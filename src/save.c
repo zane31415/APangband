@@ -420,6 +420,8 @@ void wr_player(void)
 	int i;
 
 	wr_string(player->full_name);
+	wr_string(player->server);
+	wr_string(player->slotname);
 
 	wr_string(player->died_from);
 

@@ -2,7 +2,7 @@
 <component type="desktop">
   <id>angband</id>
   <launchable type="desktop-id">angband.desktop</launchable>
-  <name>Angband</name>
+  <name>AP Angband</name>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-2.0</project_license>
   <summary>Angband is a free, single-player dungeon exploration game.</summary>

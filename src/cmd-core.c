@@ -68,6 +68,8 @@ static const struct command_info game_cmds[] =
 	{ CMD_ROLL_STATS, "roll new stats", do_cmd_roll_stats, false, false, 0 },
 	{ CMD_PREV_STATS, "use previously rolled stats", do_cmd_prev_stats, false, false, 0 },
 	{ CMD_NAME_CHOICE, "choose name", do_cmd_choose_name, false, false, 0 },
+	{ CMD_SERVER_CHOICE, "choose server", do_cmd_choose_server, false, false, 0 },
+	{ CMD_SLOTNAME_CHOICE, "choose slotname", do_cmd_choose_slotname, false, false, 0 },
 	{ CMD_HISTORY_CHOICE, "write history", do_cmd_choose_history, false, false, 0 },
 	{ CMD_ACCEPT_CHARACTER, "accept character", do_cmd_accept_character, false, false, 0 },
 

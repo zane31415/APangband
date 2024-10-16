@@ -155,8 +155,9 @@ static struct object *wiz_create_object_from_artifact(const struct artifact *art
 	obj->artifact = art;
 	copy_artifact_data(obj, art);
 
-	mark_artifact_created(art, true);
-
+    // By default do not mark artifacts as created through wizard command
+	// APTODO: consider optional based on artifactsanity
+    // mark_artifact_created(art, true);
 	return obj;
 }
 

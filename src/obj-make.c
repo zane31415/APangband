@@ -629,7 +629,7 @@ static struct object *make_artifact_special(int level, int tval)
 		new_obj->artifact = art;
 
 		/* Copy across all the data from the artifact struct */
-		copy_artifact_data(new_obj, art);
+		/*copy_artifact_data(new_obj, art);*/
 
 		/* Mark the artifact as "created" */
 		mark_artifact_created(art, true);
@@ -707,7 +707,7 @@ static bool make_artifact(struct object *obj)
 	}
 
 	if (obj->artifact) {
-		copy_artifact_data(obj, obj->artifact);
+		/*copy_artifact_data(obj, obj->artifact);*/
 		mark_artifact_created(obj->artifact, true);
 		return true;
 	}

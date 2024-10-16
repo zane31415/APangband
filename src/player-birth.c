@@ -106,6 +106,8 @@ struct birther
 
 	char *history;
 	char name[PLAYER_NAME_LEN];
+	char server[PLAYER_NAME_LEN];
+	char slotname[PLAYER_NAME_LEN];
 };
 
 
@@ -165,6 +167,8 @@ static void save_roller_data(birther *tosave)
 	tosave->history = player->history;
 	player->history = NULL;
 	my_strcpy(tosave->name, player->full_name, sizeof(tosave->name));
+	my_strcpy(tosave->server, player->server, sizeof(tosave->server));
+	my_strcpy(tosave->slotname, player->slotname, sizeof(tosave->slotname));
 }
 
 
@@ -212,6 +216,8 @@ static void load_roller_data(birther *saved, birther *prev_player)
 	}
 	player->history = string_make(saved->history);
 	my_strcpy(player->full_name, saved->name, sizeof(player->full_name));
+	my_strcpy(player->server, saved->server, sizeof(player->server));
+	my_strcpy(player->slotname, saved->slotname, sizeof(player->slotname));
 
 	/* Save the current data if the caller is interested in it. */
 	if (prev_player) {
@@ -569,6 +575,12 @@ bool player_make_simple(const char *nrace, const char *nclass,
 	cmdq_push(CMD_NAME_CHOICE);
 	cmd_set_arg_string(cmdq_peek(), "name",
 		(nplayer == NULL) ? "Simple" : nplayer);
+	cmdq_push(CMD_SERVER_CHOICE);
+	/*cmd_set_arg_string(cmdq_peek(), "server",
+		"AP");*/
+	cmdq_push(CMD_SLOTNAME_CHOICE);
+	/*cmd_set_arg_string(cmdq_peek(), "slotname",
+		"Player");*/
 	cmdq_push(CMD_ACCEPT_CHARACTER);
 	cmdq_execute(CTX_BIRTH);
 
@@ -1214,6 +1226,24 @@ void do_cmd_choose_name(struct command *cmd)
 
 	/* Set player name */
 	my_strcpy(player->full_name, str, sizeof(player->full_name));
+}
+
+void do_cmd_choose_server(struct command *cmd)
+{
+	const char *str;
+	cmd_get_arg_string(cmd, "server", &str);
+
+	/* Set player name */
+	my_strcpy(player->server, str, sizeof(player->server));
+}
+
+void do_cmd_choose_slotname(struct command *cmd)
+{
+	const char *str;
+	cmd_get_arg_string(cmd, "slotname", &str);
+
+	/* Set player name */
+	my_strcpy(player->slotname, str, sizeof(player->slotname));
 }
 
 void do_cmd_choose_history(struct command *cmd)

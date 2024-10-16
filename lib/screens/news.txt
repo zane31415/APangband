@@ -18,5 +18,5 @@
 
 {light slate}                         Website: http://rephial.org/           {/}
 {light slate}                     Forums: http://angband.oook.cz/forum/      {/}
-              
+{light slate}                     Archipelago implementation by Broney       {/}              
                            For help press '?' in-game

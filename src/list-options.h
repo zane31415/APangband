@@ -18,7 +18,7 @@ INTERFACE, false)
 OP(show_damage,           "Show damage player deals to monsters",
 INTERFACE, false)
 OP(use_old_target,        "Use old target by default",
-INTERFACE, false)
+INTERFACE, true)
 OP(pickup_always,         "Always pickup items",
 INTERFACE, false)
 OP(pickup_inven,          "Always pickup items matching inventory",
@@ -40,11 +40,11 @@ INTERFACE, false)
 OP(animate_flicker,       "Color: Shimmer multi-colored things",
 INTERFACE, false)
 OP(center_player,         "Center map continuously",
-INTERFACE, false)
+INTERFACE, true)
 OP(purple_uniques,        "Color: Show unique monsters in purple",
 INTERFACE, false)
 OP(auto_more,             "Automatically clear '-more-' prompts",
-INTERFACE, false)
+INTERFACE, true)
 OP(hp_changes_color,      "Color: Player color indicates % hit points",
 INTERFACE, true)
 OP(mouse_movement,        "Allow mouse clicks to move the player",

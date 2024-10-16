@@ -1183,6 +1183,67 @@ bool get_character_name(char *buf, size_t buflen)
 	return res;
 }
 
+/**
+ * Gets a server for the character, reacting to name changes.
+ *
+ * If sf is true, we change the savefile name depending on the character name.
+ */
+bool get_server(char *buf, size_t buflen)
+{
+	bool res;
+
+	/* Paranoia */
+	event_signal(EVENT_MESSAGE_FLUSH);
+
+	/* Display prompt */
+	prt("Enter the AP server and port (archipelago.gg:32000): ", 0, 0);
+
+	/* Save the player name */
+	my_strcpy(buf, player->server, buflen);
+
+	/* Ask the user for a string */
+	res = askfor_aux_ext(buf, buflen, NULL, NULL);
+
+	/* Clear prompt */
+	prt("", 0, 0);
+
+	/* Revert to the old name if the player doesn't pick a new one. */
+	if (!res)
+		my_strcpy(buf, player->server, buflen);
+
+	return res;
+}
+
+/**
+ * Gets a slotname for the character, reacting to name changes.
+ *
+ * If sf is true, we change the savefile name depending on the character name.
+ */
+bool get_slotname(char *buf, size_t buflen)
+{
+	bool res;
+
+	/* Paranoia */
+	event_signal(EVENT_MESSAGE_FLUSH);
+
+	/* Display prompt */
+	prt("Enter the slot name: ", 0, 0);
+
+	/* Save the player name */
+	my_strcpy(buf, player->slotname, buflen);
+
+	/* Ask the user for a string */
+	res = askfor_aux_ext(buf, buflen, NULL, NULL);
+
+	/* Clear prompt */
+	prt("", 0, 0);
+
+	/* Revert to the old name if the player doesn't pick a new one. */
+	if (!res)
+		my_strcpy(buf, player->slotname, buflen);
+
+	return res;
+}
 
 
 /**

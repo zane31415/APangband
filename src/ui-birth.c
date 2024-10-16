@@ -68,6 +68,8 @@ enum birth_stage
 	BIRTH_POINTBASED,
 	BIRTH_ROLLER,
 	BIRTH_NAME_CHOICE,
+	BIRTH_SERVER_CHOICE,
+	BIRTH_SLOTNAME_CHOICE,
 	BIRTH_HISTORY_CHOICE,
 	BIRTH_FINAL_CONFIRM,
 	BIRTH_COMPLETE
@@ -1319,6 +1321,66 @@ static enum birth_stage get_name_command(void)
 			|| get_check("A savefile for that name exists.  Overwrite it? "))) {
 		cmdq_push(CMD_NAME_CHOICE);
 		cmd_set_arg_string(cmdq_peek(), "name", name);
+		next = BIRTH_SERVER_CHOICE;
+	} else {
+		next = BIRTH_BACK;
+	}
+
+	
+	return next;
+}
+
+/**
+ * ------------------------------------------------------------------------
+ * Asking for the player's chosen server.
+ * ------------------------------------------------------------------------ */
+//phantom changes for server
+static enum birth_stage get_server_command(void)
+{
+	enum birth_stage next;
+	char server[PLAYER_NAME_LEN];
+
+	/*
+	 * If not forcing the character's name, the front end didn't set the
+	 * savefile to use, and the chosen name for the character would lead
+	 * to overwriting an existing savefile, confirm that's okay with the
+	 * player.
+	 */
+	if (arg_force_name) {
+		next = BIRTH_HISTORY_CHOICE;
+	} else if (get_server(server, sizeof(server))) {
+		cmdq_push(CMD_SERVER_CHOICE);
+		cmd_set_arg_string(cmdq_peek(), "server", server);
+		next = BIRTH_SLOTNAME_CHOICE;
+	} else {
+		next = BIRTH_BACK;
+	}
+
+	
+	return next;
+}
+
+/**
+ * ------------------------------------------------------------------------
+ * Asking for the player's chosen slotname.
+ * ------------------------------------------------------------------------ */
+//phantom changes for server
+static enum birth_stage get_slotname_command(void)
+{
+	enum birth_stage next;
+	char slotname[PLAYER_NAME_LEN];
+
+	/*
+	 * If not forcing the character's name, the front end didn't set the
+	 * savefile to use, and the chosen name for the character would lead
+	 * to overwriting an existing savefile, confirm that's okay with the
+	 * player.
+	 */
+	if (arg_force_name) {
+		next = BIRTH_HISTORY_CHOICE;
+	} else if (get_slotname(slotname, sizeof(slotname))) {
+		cmdq_push(CMD_SLOTNAME_CHOICE);
+		cmd_set_arg_string(cmdq_peek(), "slotname", slotname);
 		next = BIRTH_HISTORY_CHOICE;
 	} else {
 		next = BIRTH_BACK;
@@ -1727,6 +1789,30 @@ int textui_do_birth(void)
 					display_player(0);
 
 				next = get_name_command();
+				if (next == BIRTH_BACK)
+					next = roller;
+
+				break;
+			}
+
+			case BIRTH_SERVER_CHOICE:
+			{
+				if (prev < BIRTH_SERVER_CHOICE)
+					display_player(0);
+
+				next = get_server_command();
+				if (next == BIRTH_BACK)
+					next = roller;
+
+				break;
+			}
+
+			case BIRTH_SLOTNAME_CHOICE:
+			{
+				if (prev < BIRTH_SLOTNAME_CHOICE)
+					display_player(0);
+
+				next = get_slotname_command();
 				if (next == BIRTH_BACK)
 					next = roller;
 

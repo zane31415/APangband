@@ -102,6 +102,8 @@ bool askfor_aux_ext(char *buf, size_t len,
 	bool (*keypress_h)(char *, size_t, size_t *, size_t *, struct keypress, bool),
 	int (*mouse_h)(char *, size_t, size_t *, size_t *, struct mouseclick, bool));
 bool get_character_name(char *buf, size_t buflen);
+bool get_server(char *buf, size_t buflen);
+bool get_slotname(char *buf, size_t buflen);
 char get_char(const char *prompt, const char *options, size_t len,
 			  char fallback);
 extern bool (*get_file)(const char *suggested_name, char *path, size_t len);

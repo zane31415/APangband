@@ -659,6 +659,8 @@ int rd_player(void)
 	struct player_class *c;
 
 	rd_string(player->full_name, sizeof(player->full_name));
+	rd_string(player->server, sizeof(player->server));
+	rd_string(player->slotname, sizeof(player->slotname));
 	rd_string(player->died_from, 80);
 	player->history = mem_zalloc(250);
 	rd_string(player->history, 250);

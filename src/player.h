@@ -569,6 +569,8 @@ struct player {
 	uint8_t *spell_order;			/* Spell order */
 
 	char full_name[PLAYER_NAME_LEN];	/* Full name */
+	char server[PLAYER_NAME_LEN];
+	char slotname[PLAYER_NAME_LEN];
 	char died_from[80];					/* Cause of death */
 	char *history;						/* Player history */
 	struct quest *quests;				/* Quest history */

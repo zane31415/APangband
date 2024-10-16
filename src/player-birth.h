@@ -40,6 +40,8 @@ void do_cmd_refresh_stats(struct command *cmd);
 void do_cmd_roll_stats(struct command *cmd);
 void do_cmd_prev_stats(struct command *cmd);
 void do_cmd_choose_name(struct command *cmd);
+void do_cmd_choose_server(struct command *cmd);
+void do_cmd_choose_slotname(struct command *cmd);
 void do_cmd_choose_history(struct command *cmd);
 void do_cmd_accept_character(struct command *cmd);
 
