@@ -150,6 +150,7 @@ IF(READONLY_INSTALL)
 ENDIF()
 
 ADD_LIBRARY(OurCoreLib OBJECT
+        src/apinterface.cpp
         src/buildid.c
         src/cave-map.c
         src/cave-square.c
@@ -765,6 +766,7 @@ IF(SC_INSTALL)
         # source tree, but should the installed permissions be
         # EXECUTABLE_PERMISSIONS?
         INSTALL(FILES zlib1.dll libpng12.dll DESTINATION . PERMISSIONS ${DATA_PERMISSIONS})
+        TARGET_LINK_LIBRARIES(OurExecutable LINK_PUBLIC libpng)
     ENDIF()
     INSTALL(DIRECTORY lib/ DESTINATION lib)
     IF(BUILD_DOC)

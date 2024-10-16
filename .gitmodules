@@ -1,0 +1,18 @@
+[submodule "src/apclientpp"]
+	path = src/apclientpp
+	url = https://github.com/black-sliver/apclientpp
+[submodule "src/wswrap"]
+	path = src/wswrap
+	url = https://github.com/black-sliver/wswrap
+[submodule "src/asio"]
+	path = src/asio
+	url = https://github.com/chriskohlhoff/asio
+[submodule "src/json"]
+	path = src/json
+	url = https://github.com/nlohmann/json
+[submodule "src/valijson"]
+	path = src/valijson
+	url = https://github.com/tristanpenman/valijson
+[submodule "src/websocketpp"]
+	path = src/websocketpp
+	url = https://github.com/zaphoyd/websocketpp

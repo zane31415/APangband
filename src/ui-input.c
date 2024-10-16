@@ -1196,7 +1196,7 @@ bool get_server(char *buf, size_t buflen)
 	event_signal(EVENT_MESSAGE_FLUSH);
 
 	/* Display prompt */
-	prt("Enter the AP server and port (archipelago.gg:32000): ", 0, 0);
+	prt("Enter the AP server and port (archipelago.gg:38281): ", 0, 0);
 
 	/* Save the player name */
 	my_strcpy(buf, player->server, buflen);

@@ -17,6 +17,7 @@
  */
 
 #include "angband.h"
+#include "apinterface.h"
 #include "cmd-core.h"
 #include "cmds.h"
 #include "game-event.h"
@@ -1277,6 +1278,10 @@ void do_cmd_accept_character(struct command *cmd)
 	message_add("====================", MSG_GENERIC);
 	message_add("  ", MSG_GENERIC);
 	message_add(" ", MSG_GENERIC);
+
+    SetAPSettings(player);
+	message_add("Test", MSG_GENERIC);
+	ConnectAP();
 
 	/* Embody */
 	player_embody(player);
