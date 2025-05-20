@@ -1,0 +1,19 @@
+{
+  "cmake.configureOnOpen": true,
+  "cmake.preferredGenerators": [
+    "Ninja",
+    "Unix Makefiles",
+    "MinGW Makefiles"
+  ],
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "cmake.configureArgs": [
+  ],
+  "cmake.buildOptions": [],
+  "problems.showCurrentInStatus": false,
+  "problems.decorations.enabled": false,
+  "cmake.ignoreCMakeListsMissing": true,
+  "cmake.exportCompileCommandsFile": true,
+  "cmake.configureOnEdit": false
+}

@@ -1,6 +1,11 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.5...3.26 FATAL_ERROR)
-PROJECT(Angband LANGUAGES C)
+PROJECT(Angband LANGUAGES C CXX)
 SET(OUR_EXECUTABLE_NAME ${PROJECT_NAME})
+
+# Set the C++ standard explicitly
+SET(CMAKE_CXX_STANDARD 17)           # Use C++17 for compatibility with g++ 14.2
+SET(CMAKE_CXX_STANDARD_REQUIRED ON)  # Ensure the standard is required
+SET(CMAKE_CXX_EXTENSIONS OFF)        # Disable compiler-specific extensions
 
 # Append the custom modules to the search path.
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/cmake/modules")
@@ -752,6 +757,11 @@ IF(SC_INSTALL)
         # DATA_PERMISSIONS matches the permissions those files have in the
         # source tree, but should the installed permissions be
         # EXECUTABLE_PERMISSIONS?
+        set(DLL_DIR "${CMAKE_SOURCE_DIR}/win")
+        target_include_directories(OurExecutable PRIVATE "${DLL_DIR}/include")
+        include_directories("${DLL_DIR}/include")
+        link_directories("${DLL_DIR}/lib")
+        target_link_libraries(OurExecutable PRIVATE libpng zlib)
         INSTALL(FILES zlib1.dll libpng12.dll DESTINATION . PERMISSIONS ${DATA_PERMISSIONS})
     ENDIF()
     INSTALL(DIRECTORY lib/ DESTINATION lib)

@@ -1,0 +1,22 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "no-warnings",
+      "displayName": "Config (No Warnings)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "no-warnings",
+      "configurePreset": "no-warnings",
+      "displayName": "Build (No Warnings)",
+      "jobs": 4
+    }
+  ]
+}
