@@ -241,7 +241,7 @@ CMake.  As an example, this would build a shared installation with an
 executable that is setgid for the games group::
 
     mkdir build && cd build
-    cmake -DSUPPORT_GCU_FRONTEND=ON ..
+    cmake -DSHARED_INSTALL=ON -DSUPPORT_GCU_FRONTEND=ON ..
     make
     sudo make install
 
@@ -361,7 +361,7 @@ When debugging crashes it can be very useful to get more information about *what
     ./configure [options]
     SANITIZE_FLAGS="-fsanitize=undefined -fsanitize=address" make
 
-Note that compiling with this tools will require installing additional dependencies: libubsan libasan (names of the packages might be different in your distribution).
+Note that compiling with these tools will require installing additional dependencies: libubsan libasan (names of the packages might be different in your distribution).
 
 There is probably a way to get these tools to work on Windows. If you know how, please add the information to this file.
 
@@ -552,7 +552,8 @@ Using eclipse (Indigo) on Windows (with MinGW)
 * Go to C/C++ Build | Toolchain Editor, select "Gnu Make Builder" instead of "CDT Internal Builder"
 * go to C/C++ Build, uncheck "Generate Makefiles automatically"
 
-You still need to run ./autogen.sh, if your source files are from cloning the
+You still need to run ./autogen.sh, if your source files are from a
+"Source code" link on the github releases page or from cloning the
 git repository, and ./configure manually, outside eclipse (see above)
 
 Using Visual Studio

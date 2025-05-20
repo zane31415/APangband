@@ -76,10 +76,27 @@ static bool borg_object_similar(borg_item *o_ptr, borg_item *j_ptr)
 {
     /* NOTE: This assumes the giving of one item at a time */
     int total = o_ptr->iqty + 1;
+    int i;
 
     /* Require identical object types */
     if (o_ptr->kind != j_ptr->kind)
         return 0;
+
+    /* Different flags don't stack */
+    if (!of_is_equal(o_ptr->flags, j_ptr->flags)) {
+        return false;
+    }
+
+    /* Different elements don't stack */
+    for (i = 0; i < ELEM_MAX; ++i) {
+        if (o_ptr->el_info[i].res_level != j_ptr->el_info[i].res_level) {
+            return false;
+        }
+        if ((o_ptr->el_info[i].flags & (EL_INFO_HATES | EL_INFO_IGNORE))
+                != (j_ptr->el_info[i].flags & (EL_INFO_HATES | EL_INFO_IGNORE))) {
+            return false;
+        }
+    }
 
     /* Analyze the items */
     switch (o_ptr->tval) {
@@ -164,9 +181,28 @@ static bool borg_object_similar(borg_item *o_ptr, borg_item *j_ptr)
         if (o_ptr->to_a != j_ptr->to_a)
             return false;
 
-        /* Require identical "pval" code */
-        if (o_ptr->pval != j_ptr->pval)
+        /* Require identical modifiers */
+        for (i = 0; i < OBJ_MOD_MAX; ++i) {
+            if (o_ptr->modifiers[i] != j_ptr->modifiers[i]) {
+                return false;
+            }
+        }
+
+        /*
+         * Require identical curses; note that curse powers are not
+         * available so this is not the same as what object_similar() does
+         */
+        if (o_ptr->cursed != j_ptr->cursed
+                || o_ptr->uncursable != j_ptr->uncursable) {
             return false;
+        }
+        if (o_ptr->cursed) {
+            for (i = 0; i < BORG_CURSE_MAX; ++i) {
+                if (o_ptr->curses[i] != j_ptr->curses[i]) {
+                    return false;
+                }
+            }
+        }
 
         /* Require identical "artifact" names */
         if (o_ptr->art_idx != j_ptr->art_idx)
@@ -287,8 +323,10 @@ static bool borg_think_home_sell_bad(int i, int32_t borg_empty_home_power)
 {
     borg_item *item = &borg_items[i];
 
+    int charge_each = 0;
+
     /* Skip empty or unknown items */
-    if (!item->iqty || (!item->kind && !item->aware))
+    if (!item->iqty || !item->aware)
         return true;
 
     /* Skip swap items */
@@ -320,18 +358,35 @@ static bool borg_think_home_sell_bad(int i, int32_t borg_empty_home_power)
     if (borg_power_home() <= borg_empty_home_power)
         return true;
 
+    /* for wands and staffs adjust charges */
+    if (item->tval == TV_STAFF || item->tval == TV_WAND)
+        charge_each = item->pval / item->iqty;
+
     /* assume one item sold.  */
-    borg_items[i].iqty--;
+    item->iqty--;
+
+    /* for wands and staffs adjust charges */
+    if (item->tval == TV_STAFF || item->tval == TV_WAND)
+        item->pval -= charge_each;
 
     /* Examine borg */
     borg_notice(true);
 
     /* if this reduces the borgs power, it is a bad transaction */
     if (borg_power() < borg.power) {
-        borg_items[i].iqty++;
+        item->iqty++;
+
+        /* for wands and staffs adjust charges */
+        if (item->tval == TV_STAFF || item->tval == TV_WAND)
+            item->pval += charge_each;
+
         return true;
     }
-    borg_items[i].iqty++;
+    item->iqty++;
+
+    /* for wands and staffs adjust charges */
+    if (item->tval == TV_STAFF || item->tval == TV_WAND)
+        item->pval += charge_each;
 
     return false;
 }
@@ -347,6 +402,7 @@ static void borg_think_home_sell_best(int32_t * best_home_power)
     int32_t    home_power;
     int32_t    borg_empty_home_power;
     int        i, k, n;
+    int        charge_each = 0;
 
     /* get what an empty home would have for power */
     borg_notice_home(NULL, true);
@@ -377,10 +433,16 @@ static void borg_think_home_sell_best(int32_t * best_home_power)
             if (borg_think_home_sell_bad(i, borg_empty_home_power))
                 continue;
 
+            /* for wands and staffs adjust charges */
+            if (item->tval == TV_STAFF || item->tval == TV_WAND) 
+                charge_each = item->pval / item->iqty;
+
             /* stacking? */
             if (borg_object_similar(item2, item)) {
                 /* if this stacks with what was previously here */
                 item2->iqty++;
+                if (item->tval == TV_STAFF || item->tval == TV_WAND)
+                    item2->pval += charge_each;
             } else {
                 bool found_match = false;
 
@@ -400,10 +462,16 @@ static void borg_think_home_sell_best(int32_t * best_home_power)
 
                 /* only move one into a non-stack slot */
                 item2->iqty = 1;
+                if (item->tval == TV_STAFF || item->tval == TV_WAND)
+                    item2->pval = charge_each;
+
             }
 
             /* remove item from pack */
             item->iqty--;
+
+            if (item->tval == TV_STAFF || item->tval == TV_WAND)
+                item->pval -= charge_each;
 
             /* Note the attempt */
             test_item[n] = i + z_info->store_inven_max;
@@ -640,6 +708,10 @@ static bool borg_store_buys(borg_item *item, int who)
         case TV_FOOD:
         case TV_MUSHROOM:
         case TV_FLASK:
+        case TV_SHOT:
+        case TV_BOLT:
+        case TV_ARROW:
+        case TV_DIGGING:
             return true;
         }
         return false;
@@ -710,8 +782,6 @@ static bool borg_store_buys(borg_item *item, int who)
         switch (item->tval) {
         case TV_AMULET:
         case TV_RING:
-        case TV_SCROLL:
-        case TV_POTION:
         case TV_STAFF:
         case TV_WAND:
         case TV_ROD:
@@ -722,6 +792,11 @@ static bool borg_store_buys(borg_item *item, int who)
 
     /* Black Market */
     case 7:
+
+        /* if we don't get money on sales, allow anything to be */
+        /* sold to the black market */
+        if (OPT(player, birth_no_selling)) 
+            return true;
 
         /* Analyze the type */
         switch (item->tval) {
@@ -875,6 +950,7 @@ bool borg_think_shop_sell_useless(void)
     int     k, b_k = -1;
     int     i, b_i = -1;
     int     qty = 1;
+
     int32_t p, b_p = 0L;
     int32_t c   = 0L;
     int32_t b_c = 30001L;
@@ -910,18 +986,6 @@ bool borg_think_shop_sell_useless(void)
                 && item->sval == sv_rod_mapping && item->iqty <= 2)
                 continue;
 
-            /* Avoid selling some staffs */
-            if (item->tval == TV_STAFF) {
-                /* destruction */
-                if (item->sval == sv_staff_destruction
-                    && borg.trait[BI_ASTFDEST] < 2)
-                    continue;
-                /* teleportation */
-                if (item->sval == sv_staff_teleportation
-                    && num_tele_staves < kb_info[TV_STAFF].max_stack)
-                    continue;
-            }
-
             /* Do not sell our attack wands if they still have charges */
             if (item->tval == TV_WAND && borg.trait[BI_CLEVEL] < 35
                 && (item->sval == sv_wand_magic_missile
@@ -952,6 +1016,13 @@ bool borg_think_shop_sell_useless(void)
 
             /* Lose a single item */
             borg_items[i].iqty -= qty;
+
+            /* for wands and staffs adjust charges */
+            if (item->tval == TV_STAFF || item->tval == TV_WAND) {
+                int charge_loss = safe_items[i].pval/safe_items[i].iqty;
+                borg_shops[k].ware[icky].pval = qty * charge_loss;
+                borg_items[i].pval -= (qty * charge_loss);
+            }
 
             /* Fix later */
             fix = true;
@@ -1145,6 +1216,14 @@ int borg_count_sell(void)
         /* Don't sell my books */
         if (obj_kind_can_browse(&k_info[item->kind]))
             continue;
+
+        /* Never sell valuable non-id'd items */
+        /* unless you have a stack, in which case, sell one to ID them */
+        if (borg_item_note_needs_id(item)) {
+            /* note if we have more than one */
+            if (!borg_has_mutiple(item))
+                return false;
+        }
 
         /* Don't sell my needed potion/wands/staff/scroll collection */
         if ((item->tval == TV_POTION && item->sval == sv_potion_cure_serious)

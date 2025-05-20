@@ -339,7 +339,7 @@ void borg_flow_spread(int depth, bool optimize, bool avoid, bool tunneling,
             /* Access the grid */
             ag = &borg_grids[y][x];
 
-            if (sneak) {
+            if (sneak && !borg_desperate && !twitchy) {
                 /* Scan the neighbors */
                 for (ii = 0; ii < 8; ii++) {
                     /* Neighbor grid */
@@ -361,7 +361,7 @@ void borg_flow_spread(int depth, bool optimize, bool avoid, bool tunneling,
                 }
             }
             /* The grid I am thinking about is adjacent to a monster */
-            if (sneak && bad_sneak && !borg_desperate && !twitchy)
+            if (bad_sneak)
                 continue;
 
             /* Avoid "wall" grids (not doors) unless tunneling*/
@@ -894,18 +894,28 @@ static bool borg_play_step(int y2, int x2)
     }
 
     /* Traps -- disarm -- */
-    if (borg.trait[BI_CURLITE] && !borg.trait[BI_ISBLIND]
+    /* NOTE: If a scary guy is on the level, we allow the borg to run over */
+    /* the trap in order to escape this level. */
+    if (borg.trait[BI_LIGHT] && !borg.trait[BI_ISBLIND]
         && !borg.trait[BI_ISCONFUSED] && !scaryguy_on_level && ag->trap) {
 
-        /* NOTE: If a scary guy is on the level, we allow the borg to run over
-         * the trap in order to escape this level.
-         */
+        /* allow "destroy doors" activation */
+        if (borg_activate_item(act_disable_traps)) {
+            borg_note("# Activation to Disable Traps, Destroy Doors");
+            ag->trap = 0;
+            /* since this just disables the trap and doesn't remove it, */
+            /* don't rest next to it */
+            borg.no_rest_prep = 3000;
 
-        /* allow "destroy doors" */
+            /* the activation needs to target the trap */
+            borg_target(borg.goal.g);
+            return true;
+        }
+
+        /* allow "destroy doors" spell */
         /* don't bother unless we are near full mana */
         if (borg.trait[BI_CURSP] > ((borg.trait[BI_MAXSP] * 4) / 5)) {
-            if (borg_spell(DISABLE_TRAPS_DESTROY_DOORS)
-                || borg_activate_item(act_disable_traps)) {
+            if (borg_spell(DISABLE_TRAPS_DESTROY_DOORS)) {
                 borg_note("# Disable Traps, Destroy Doors");
                 ag->trap = 0;
                 /* since this just disables the trap and doesn't remove it, */
@@ -999,6 +1009,14 @@ static bool borg_play_step(int y2, int x2)
 
         return true;
     }
+
+    /* eliminate things we can't step on */
+    /* we only seem to get this far when trying to dig out vaults */
+    if (ag->feat == FEAT_PERM)
+        return false;
+
+    if (ag->feat == FEAT_LAVA && !borg.trait[BI_IFIRE])
+        return false;
 
     /* Rubble, Treasure, Seams, Walls -- Tunnel or Melt */
     /* HACK depends on FEAT order, kinda evil. */

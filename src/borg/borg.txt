@@ -146,13 +146,18 @@ borg_respawn_winners = FALSE
 # This variable will determine the minimal character level at which the borg
 # will create a character dump file.  That file contains some vital information
 # concerning the status of the borg at the time of his demise.  It is placed
-# in the user directory.
-# The borg_save_death variable will tell the borg to save the game in the user
-# directory so that it can be examined more closely.  The clevel of the borg
-# must at least equal the borg_dump_level in order for the game to save.
+# in the archive directory.
+# The borg_save_death variable will tell the borg to save the game in the 
+# archive directory so that it can be examined more closely.  The clevel of the
+# borg must at least equal the borg_dump_level in order for the game to save.
 
 borg_dump_level = 1
 borg_save_death = 1
+
+# Autosave 
+# this causes the borg to do a (redundant) save at the start of every level and
+@ create a backup of that save to the archive directory
+borg_autosave = FALSE
 
 # Auto Stops
 
@@ -417,8 +422,9 @@ Power
 	condition(value(trait, heavy bow)): reward(-500000);
 
 #light radius
-	condition(value(trait, cur light) <= 3): reward(value(trait, cur light) * 10000);
-	condition(value(trait, cur light) > 3): reward(value(trait, cur light) * 1000 + 30000);
+	condition(value(class, necromancer)): reward(value(trait, light) * 10000);
+	condition(value(trait, light) <= 3 and !value(class, necromancer)): reward(value(trait, light) * 10000);
+	condition(value(trait, light) > 3 and ! value(class, necromancer)): reward(value(trait, light) * 1000 + 30000);
 
 	reward(value(trait, extra moves) * 3000);
 	reward(value(trait, damage reduction) * 10000);
@@ -861,8 +867,8 @@ Power
 # magic map
 	value(trait, amt magic map): range(1, 1): reward(4000);
 
-# lite
-	value(trait, amt lite): range(1, 1): reward(1000);
+# call lite
+	value(trait, amt call lite): condition(!value(class, necromancer)): range(1, 1): reward(1000);
 
 # genocide
 	value(scroll, mass banishment): range(1, 10): condition(value(trait, max depth) >= 100): reward(10000);
@@ -1037,20 +1043,20 @@ Depth Requirement
 
 	depth(40): condition(!value(trait, resist poison with swap));
 	depth(40): condition(!value(trait, resist conf with swap));
-	depth(40): condition(value(trait, cur str) < 16);
-	depth(40): condition((value(class, priest) or value(class, druid) or value(class, ranger) or value(class, paladin)) and value(trait, cur wis) < 16);
-	depth(40): condition((value(class, mage) or value(class, necromancer) or value(class, blackguard) or value(class, rogue)) and value(trait, cur int) < 16);
-	depth(40): condition(value(trait, cur dex) < 16);
-	depth(40): condition(value(trait, cur con) < 16);
+	depth(40): condition(value(trait, str) < 16);
+	depth(40): condition((value(class, priest) or value(class, druid) or value(class, ranger) or value(class, paladin)) and value(trait, wis) < 16);
+	depth(40): condition((value(class, mage) or value(class, necromancer) or value(class, blackguard) or value(class, rogue)) and value(trait, int) < 16);
+	depth(40): condition(value(trait, dex) < 16);
+	depth(40): condition(value(trait, con) < 16);
 
 	depth(46): condition(value(trait, speed) < 115);
 	depth(46): condition(value(trait, amt heal) < 1 and value(trait, amt ezheal) < 1);
 	depth(46): condition(value(trait, max hp) < 500 and !value(config, plays_risky));
-	depth(46): condition(value(trait, cur str) < (18+40));
-	depth(46): condition((value(class, priest) or value(class, druid) or value(class, ranger) or value(class, paladin)) and value(trait, cur wis) < 18+100);
-	depth(46): condition((value(class, mage) or value(class, necromancer) or value(class, blackguard) or value(class, rogue)) and value(trait, cur int) < 18+100);
-	depth(46): condition(value(trait, cur dex) < (18+60));
-	depth(46): condition(value(trait, cur con) < (18+60));
+	depth(46): condition(value(trait, str) < (18+40));
+	depth(46): condition((value(class, priest) or value(class, druid) or value(class, ranger) or value(class, paladin)) and value(trait, wis) < 18+100);
+	depth(46): condition((value(class, mage) or value(class, necromancer) or value(class, blackguard) or value(class, rogue)) and value(trait, int) < 18+100);
+	depth(46): condition(value(trait, dex) < (18+60));
+	depth(46): condition(value(trait, con) < (18+60));
 	depth(46): condition(!value(trait, hold life with swap) and value(trait, max clevel) < 50);
 
 	depth(56): condition(value(trait, amt heal) < 2 and value(trait, amt ezheal) < 1);
@@ -1073,7 +1079,7 @@ Depth Requirement
 
 Restock Requirement
 [
-	depth(1): condition(value(trait, cur light) < 1);
+	depth(1): condition(value(trait, light) < 1);
 	depth(1): condition(value(trait, fuel) < 1 and !value(trait, light));
 
 	depth(2): condition(value(trait, fuel) < 2 and !value(trait, light));
@@ -1082,7 +1088,7 @@ Restock Requirement
 	depth(6): condition(value(trait, amt phase) < 1);
 	depth(6): condition(value(trait, max clevel) < 30 and (value(trait,  amt potion clw) + value(trait,  amt potion csw) + value(trait,  amt potion ccw)) < 1);
 
-	depth(10): condition(value(trait, cur light) < 2);
+	depth(10): condition(value(trait, light) < 2 and !value(class, necromancer));
 	depth(10): condition(value(trait, max clevel) < 30 and (value(trait,  amt potion clw) + value(trait,  amt potion csw) + value(trait,  amt potion ccw)) < 2);
 	depth(10): condition((value(trait,  amt teleport) + value(trait,  amt escape)) < 2);
 

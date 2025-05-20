@@ -173,7 +173,7 @@ static int borg_defend_aux_bless(int p1)
         return 0;
 
     /* Dark */
-    if (!(ag->info & BORG_GLOW) && borg.trait[BI_CURLITE] == 0)
+    if (!(ag->info & BORG_GLOW) && borg.trait[BI_LIGHT] == 0)
         return 0;
 
     /* no spell */
@@ -996,7 +996,7 @@ static int borg_defend_aux_prot_evil(int p1)
         || borg.trait[BI_ISIMAGE])
         pfe_spell = false;
 
-    if (!(ag->info & BORG_GLOW) && borg.trait[BI_CURLITE] == 0)
+    if (!(ag->info & BORG_GLOW) && borg.trait[BI_LIGHT] == 0)
         pfe_spell = false;
 
     if (borg_equips_item(act_protevil, true))
@@ -1226,14 +1226,15 @@ static int borg_defend_aux_tele_away(int p1)
     /* choose, then target a bad guy.
      * Damage will be the danger to my grid which the monster creates.
      * We are targeting the single most dangerous monster.
-     * p2 will be the original danger (p1) minus the danger from the most
-     * dangerous monster eliminated. ie:  if we are fighting only a single
-     * monster who is generating 500 danger and we target him, then p2 _should_
-     * end up 0, since p1 - his danger is 500-500. If we are fighting two guys
+     * p1 will be the original danger. p2 is how much p1 is reduced by
+     * the teleported monsters. ie:  if we are fighting only a single monster 
+     * is generating 500 danger and we target him, then p2 _should_
+     * end up 500, since p1 - his danger is 500-0. If we are fighting two guys
      * each creating 500 danger, then p2 will be 500, since 1000-500 = 500.
      */
-    p2 = p1
-         - borg_launch_bolt(-1, p1, BORG_ATTACK_AWAY_ALL, z_info->max_range, 0);
+    p2 = borg_launch_bolt(0, p1, BORG_ATTACK_AWAY_ALL, z_info->max_range, 0);
+    if (p2 <= 0)
+        return 0;
 
     /* check to see if I am left better off */
     if (borg_simulate) {
@@ -1241,9 +1242,9 @@ static int borg_defend_aux_tele_away(int p1)
         borg_temp_n     = 0;
         borg_tp_other_n = 0;
 
-        if (p1 > p2 && p2 < avoidance / 2) {
+        if (p2 && p2 > avoidance / 2) {
             /* Simulation */
-            return (p1 - p2);
+            return p2;
         } else
             return 0;
     }
@@ -1271,7 +1272,7 @@ static int borg_defend_aux_tele_away(int p1)
         successful_target = -1;
 
         /* Value */
-        return (p2);
+        return p2;
     }
 
     return 0;
@@ -1561,7 +1562,7 @@ static int borg_defend_aux_glyph(int p1)
         && glyph_spell)
         glyph_spell = false;
 
-    if (!(ag->info & BORG_GLOW) && borg.trait[BI_CURLITE] == 0)
+    if (!(ag->info & BORG_GLOW) && borg.trait[BI_LIGHT] == 0)
         glyph_spell = false;
 
     if (!glyph_spell)
@@ -2688,7 +2689,7 @@ static int borg_defend_aux_inviso(int p1)
         return 0;
 
     /* Darkness */
-    if (!(ag->info & BORG_GLOW) && !borg.trait[BI_CURLITE])
+    if (!(ag->info & BORG_GLOW) && !borg.trait[BI_LIGHT])
         return 0;
 
     /* No real value known, but lets cast it to find the bad guys. */
@@ -2976,11 +2977,14 @@ static int borg_defend_aux_rest(void)
         && (!borg_as_position || borg_t - borg_t_antisummon >= 50))
         return 0;
 
-        /* Not if I can not teleport others away */
-#if 0
-    if (!borg_spell_okay_fail(3, 1, 30) &&
-        !borg_spell_okay_fail(4, 2, 30)) return 0;
-#endif
+    /* never in town */
+    if (borg.trait[BI_CDEPTH] == 0)
+        return 0;
+
+    /* Not if I can not teleport others away */
+    if (borg_spell_okay_fail(TELEPORT_OTHER, 30))
+        return 0;
+
     /* Not if a monster can see me */
     /* Examine all the monsters */
     for (i = 1; i < borg_kills_nxt; i++) {
@@ -3140,7 +3144,7 @@ static int borg_defend_aux_tele_away_morgoth(void)
      * If left as beam, he targets the collection of monsters.
      */
     p2 = borg_launch_bolt(
-        -1, 50, BORG_ATTACK_AWAY_ALL_MORGOTH, z_info->max_range, 0);
+        0, 50, BORG_ATTACK_AWAY_ALL_MORGOTH, z_info->max_range, 0);
 
     /* Normalize the value a bit */
     if (p2 > 1000)

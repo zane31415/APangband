@@ -109,21 +109,21 @@ bool borg_choose_shop(void)
 
     /* If Starving  -- flow to general store */
     if (borg.trait[BI_FOOD] == 0
-        || (borg.trait[BI_CURLITE] == 0 && borg.trait[BI_CLEVEL] >= 2)) {
+        || (borg.trait[BI_LIGHT] == 0 && borg.trait[BI_CLEVEL] >= 2)) {
         /* G Store first */
         borg.goal.shop = 0;
     }
 
     /* if No Lantern -- flow to general store */
-    if (borg.trait[BI_CURLITE] == 1 && borg.trait[BI_GOLD] >= 100)
+    if (borg.trait[BI_LIGHT] == 1 && borg.trait[BI_GOLD] >= 100)
         borg.goal.shop = 0;
 
     /* If poisoned, bleeding, or needing to shop instantly
      * Buy items straight away, without having to see each shop
      */
-    if ((borg.trait[BI_CURLITE] == 0 || borg.trait[BI_FOOD] == 0
+    if ((borg.trait[BI_LIGHT] == 0 || borg.trait[BI_FOOD] == 0
             || borg.trait[BI_ISCUT] || borg.trait[BI_ISPOISONED])
-        || (borg.trait[BI_CURLITE] == 1 && borg.trait[BI_GOLD] >= 100
+        || (borg.trait[BI_LIGHT] == 1 && borg.trait[BI_GOLD] >= 100
             && borg.trait[BI_CLEVEL] < 10)) {
         if (borg_think_shop_buy_useful()) {
             /* Message */
@@ -155,9 +155,7 @@ bool borg_choose_shop(void)
 
     /* If it is time to try to put on our best stuff, and we have free slots, go
      * home */
-    if (borg.goal.do_best
-        && !borg_shops[BORG_HOME].ware[z_info->store_inven_max - 1].iqty
-        && borg_first_empty_inventory_slot() != -1) {
+    if (borg.goal.do_best && !borg_home_full() && !borg_inventory_full()) {
         borg.goal.shop = BORG_HOME;
         return true;
     }

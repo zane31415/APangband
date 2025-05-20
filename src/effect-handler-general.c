@@ -127,7 +127,7 @@ struct monster *monster_target_monster(effect_handler_context_t *context)
  *     3) if a player is moving, it does not have player traps
  *     4) if a monster is moving, it does not have a glyph of warding
  * There's some discussion here,
- * http://angband.oook.cz/forum/showthread.php?t=11066
+ * https://angband.live/forums/forum/angband/vanilla/10323-the-evil-eye-commands-you-to-return-or-not .
  */
 static bool has_teleport_destination_prereqs(struct chunk *c, struct loc grid,
 		bool is_player_moving)
@@ -1126,7 +1126,8 @@ bool effect_handler_RECALL(effect_handler_context_t *context)
 	if (!player->word_recall) {
 		/* Reset recall depth */
 		if (player->depth > 0) {
-			if (player->depth != player->max_depth) {
+			if (player->depth != player->max_depth
+					&& !OPT(player, birth_levels_persist)) {
 				if (get_check("Set recall depth to current depth? ")) {
 					player->recall_depth = player->max_depth = player->depth;
 				}
@@ -1160,18 +1161,10 @@ bool effect_handler_RECALL(effect_handler_context_t *context)
 
 bool effect_handler_DEEP_DESCENT(effect_handler_context_t *context)
 {
-	int i;
-
 	/* Calculate target depth */
 	int target_increment = (4 / z_info->stair_skip) + 1;
 	int target_depth = dungeon_get_next_level(player, player->max_depth,
 		target_increment);
-	for (i = 5; i > 0; i--) {
-		if (is_quest(player, target_depth)) break;
-		if (target_depth >= z_info->max_depth - 1) break;
-
-		target_depth++;
-	}
 
 	if (target_depth > player->depth) {
 		msgt(MSG_TPLEVEL, "The air around you starts to swirl...");

@@ -207,8 +207,8 @@ void dump_objects(ang_file *fff)
 		if (!kind->name || !kind->tval) continue;
 
 		object_short_name(name, sizeof name, kind->name);
-		file_putf(fff, "object:%s:%s:%d:%d\n", tval_find_name(kind->tval),
-				name, kind_x_attr[i], kind_x_char[i]);
+		file_putf(fff, "object:%s:%s:%d:%ld\n", tval_find_name(kind->tval),
+				name, kind_x_attr[i], (long int)kind_x_char[i]);
 	}
 }
 
@@ -730,7 +730,7 @@ static enum parser_error parse_prefs_monster_base(struct parser *p)
 	return PARSE_ERROR_NONE;
 }
 
-static void set_trap_graphic(int trap_idx, int light_idx, uint8_t attr, char ch) {
+static void set_trap_graphic(int trap_idx, int light_idx, uint8_t attr, wchar_t ch) {
 	if (light_idx < LIGHTING_MAX) {
 		trap_x_attr[light_idx][trap_idx] = attr;
 		trap_x_char[light_idx][trap_idx] = ch;

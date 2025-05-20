@@ -194,8 +194,7 @@ static int get_tile_fraction_from_size(const graphics_mode *gm,
         tileHeight = cell_h;
     }
     while (1) {
-        CGFloat fracf = tile_size_fractions[i] / 1000.0;
-        CGFloat this_area = (fracf * tileWidth) * (fracf * tileHeight);
+        CGFloat fracf, this_area;
 
         if (i >= (int) N_ELEMENTS(tile_size_fractions)) {
             /*
@@ -204,6 +203,8 @@ static int get_tile_fraction_from_size(const graphics_mode *gm,
              */
             return tile_size_fractions[N_ELEMENTS(tile_size_fractions) - 1];
         }
+        fracf = tile_size_fractions[i] / 1000.0;
+        this_area = (fracf * tileWidth) * (fracf * tileHeight);
         if (area <= this_area) {
             if (i == 0) {
                 /*
@@ -218,8 +219,6 @@ static int get_tile_fraction_from_size(const graphics_mode *gm,
         prev_area = this_area;
         ++i;
     }
-    /* Area is larger than that for any available option.  Use the largest. */
-    return tile_size_fractions[N_ELEMENTS(tile_size_fractions) - 1];
 }
 
 /**
@@ -5101,20 +5100,25 @@ static BOOL send_event(NSEvent *event)
                 [NSApp sendEvent:event];
                 break;
             }
-            
-            if (! [[event characters] length]) break;
-            
-            
+
             /* Extract some modifiers */
             int mc = !! (modifiers & NSControlKeyMask);
             int ms = !! (modifiers & NSShiftKeyMask);
             int mo = !! (modifiers & NSAlternateKeyMask);
             int mx = !! (modifiers & NSCommandKeyMask);
             int kp = !! (modifiers & NSNumericPadKeyMask);
-            
-            
+
             /* Get the Angband char corresponding to this unichar */
-            unichar c = [[event characters] characterAtIndex:0];
+            unichar c;
+            if ([[event characters] length]) {
+                c = [[event characters] characterAtIndex:0];
+#ifdef KC_MOD_ALT
+            } else if ([[event charactersIgnoringModifiers] length]) {
+                c = [[event charactersIgnoringModifiers] characterAtIndex:0];
+#endif
+            } else {
+                break;
+            }
             keycode_t ch;
             switch (c) {
                 /*

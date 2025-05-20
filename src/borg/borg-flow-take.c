@@ -276,7 +276,7 @@ static int borg_new_take(struct object_kind *kind, int y, int x)
         take->x, take->y));
 
     /* Wipe goals only if I have some light source */
-    if (borg.trait[BI_CURLITE])
+    if (borg.trait[BI_LIGHT])
         borg.goal.type = 0;
 
     /* Hack -- Force the object to sit on a floor grid */
@@ -446,7 +446,7 @@ bool borg_flow_take(bool viewable, int nearness)
         return false;
 
     /* If out of fuel, don't mess around */
-    if (!borg.trait[BI_CURLITE])
+    if (!borg.trait[BI_LIGHT])
         return false;
 
     /* Not if sitting in a sea of runes */
@@ -519,7 +519,8 @@ bool borg_flow_take(bool viewable, int nearness)
         /* No need to chase certain things down after a certain amount.  Don't
          * chase: Money Other spell books Wrong ammo
          */
-        if (borg.trait[BI_GOLD] >= 500000) {
+        if (borg.trait[BI_GOLD] >= 500000
+            && borg_cfg[BORG_MONEY_SCUM_AMOUNT] == 0) {
             if (take->tval == TV_GOLD)
                 continue;
             if (tval_is_book_k(&k_info[take->kind->kidx])
@@ -766,7 +767,7 @@ bool borg_flow_take_lunal(bool viewable, int nearness)
                     if (borg_items[ii].iqty == z_info->quiver_slot_size)
                         continue;
 
-                    /* Both objects should have the same ID value */
+                    /* Both objects should have the same kind value */
                     if (take->kind->kidx != borg_items[ii].kind)
                         continue;
 
@@ -782,7 +783,7 @@ bool borg_flow_take_lunal(bool viewable, int nearness)
                     if (!borg_items[ii].iqty)
                         continue;
 
-                    /* Both objects should have the same ID value */
+                    /* Both objects should have the same kind value */
                     if (take->kind->kidx != borg_items[ii].kind)
                         continue;
 
