@@ -408,6 +408,23 @@ static void borg_set_curses(borg_item *item, const struct object *o)
 }
 
 /*
+ * Look for a negative flag on the object
+ */
+static bool borg_item_has_negative_flag(const borg_item* item)
+{
+    size_t i;
+    for (i = of_next(item->flags, FLAG_START); i != FLAG_END;
+        i = of_next(item->flags, i + 1)) {
+
+        /* Get the flag details */
+        struct obj_property* flag = lookup_obj_property(OBJ_PROPERTY_FLAG, i);
+        if (flag && flag->power < 0)
+            return true;
+    }
+    return false;
+}
+
+/*
  * Analyze an item, also given its name
  *
  * This cheats all the information, and maybe is getting information
@@ -460,7 +477,9 @@ void borg_item_analyze(
     item->weight  = object_weight_one(real_item);
     item->timeout = real_item->timeout;
     item->level   = real_item->kind->level;
-    item->aware   = object_flavor_is_aware(real_item);
+
+    /* always aware of items in the store */
+    item->aware   = in_store || object_flavor_is_aware(real_item);
 
     /* get info from the known part of the object */
     item->ac   = o->ac;
@@ -481,6 +500,11 @@ void borg_item_analyze(
 
     if (o->curses != NULL)
         borg_set_curses(item, o);
+
+    /* If any of the flags are negative, count the object as cursed */
+    if (borg_item_has_negative_flag(item)) {
+        item->cursed = true;
+    }
 
     if (o->slays)
         borg_set_slays(item, o);
@@ -576,8 +600,8 @@ void borg_item_analyze(
             item->pval = 0;
     }
 
-    /* Kind index -- Only if partially ID or this is a store object */
-    if (item->aware || in_store)
+    /* Kind index -- Only if we are aware of its kind */
+    if (item->aware)
         item->kind = o->kind->kidx;
 
     if (o->artifact)

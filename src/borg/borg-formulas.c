@@ -57,7 +57,7 @@ static const grouper value_type_names[] = {
     { VT_ACTIVATION, "activation" },
     { VT_CLASS, "class" },
 #define TV(a, b) { VT_##a, b },
-#include "list-tvals.h"
+#include "../list-tvals.h"
 #undef TV
 };
 
@@ -965,7 +965,7 @@ int32_t borg_power_dynamic(void)
 
         /* Some items will be used immediately and should not contribute to
          * encumbrance */
-        if (item && item->iqty
+        if (item && item->iqty && item->aware
             && ((item->tval == TV_SCROLL
                     && ((item->sval == sv_scroll_enchant_armor
                             && borg.trait[BI_AENCH_ARM] < 1000

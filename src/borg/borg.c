@@ -21,7 +21,6 @@
 
 #ifdef ALLOW_BORG
 
-#include "../cmds.h"
 #include "../game-input.h"
 #include "../game-world.h"
 #include "../player-timed.h"
@@ -89,7 +88,6 @@ int *borg_cfg;
  */
 bool borg_active; /* Actually active */
 bool borg_cancel; /* Being cancelled */
-bool borg_flag_save     = false; /* Save savefile at each level */
 bool borg_save          = false; /* do a save next level */
 bool borg_graphics      = false; /* rr9's graphics */
 
@@ -313,134 +311,10 @@ static struct keypress internal_borg_inkey(int flush_first)
         borg_prompt = false;
     }
 
-    /* Mega-Hack -- Catch "Die? [y/n]" messages */
-    /* If there is text on the first line... */
-    /* And the game does not want a command... */
-    /* And the cursor is on the top line... */
-    /* And the text acquired above is "Die?" */
-    if (borg_prompt && !inkey_flag && (y == 0) && (x >= 4)
-        && prefix(buf, "Die?")
-        && borg_cheat_death) {
-        /* Flush messages */
-        borg_parse(NULL);
-
-        /* flush the buffer */
-        borg_flush();
-
-        /* Take note */
-        borg_note("# Cheating death...");
-
-#ifndef BABLOS
-        /* Dump the Character Map*/
-        if (borg.trait[BI_CLEVEL] >= borg_cfg[BORG_DUMP_LEVEL]
-            || strstr(player->died_from, "starvation"))
-            borg_write_map(false);
-
-        /* Log the death */
-        borg_log_death();
-        borg_log_death_data();
-
-#if 0
-        /* Note the score */
-        borg_enter_score();
-#endif
-
-        if (!borg_cfg[BORG_CHEAT_DEATH]) {
-            reincarnate_borg();
-            borg_respawning = 7;
-        } else
-            do_cmd_wiz_cure_all(0);
-#endif /* BABLOS */
-
-        key.code = 'n';
-        return key;
-    }
-
-    /* with 292, there is a flush(0, 0, 0) introduced as it asks for
-     * confirmation. This flush is messing up the borg.  This will allow the
-     * borg to work around the flush Attempt to catch "Attempt it anyway? [y/n]"
-     */
-    if (borg_prompt && !inkey_flag && (y == 0) && (x >= 4)
-        && prefix(buf, "Atte")) {
-        /* Return the confirmation */
-        if (borg_cfg[BORG_VERBOSE])
-            borg_note("# Confirming use of Spell/Prayer when low on mana.");
-        key.code = 'y';
-        return key;
-    }
-
-    /* Wearing two rings.  Place this on the left hand */
-    if (borg_prompt && !inkey_flag && (y == 0) && (x >= 12)
-        && (prefix(buf, "(Equip: c-d,"))) {
-        /* Left hand */
-        key.code = 'c';
-        if (borg_cfg[BORG_VERBOSE])
-            borg_note("# Putting ring on the left hand.");
-        return key;
-    }
-
-    /* 
-     * with 292, there is a flush(0, 0, 0) introduced as it asks for
-     * confirmation. This flush is messing up the borg.  This will allow the
-     * borg to work around the flush This is used only with emergency use of
-     * spells like Magic Missile Attempt to catch "Direction (5 old target"
-     */
-    if (borg_prompt && !inkey_flag && (y == 0) && !borg_inkey(false)
-        && (x >= 10) && strncmp(buf, "Direction", 9) == 0) {
-        if (borg_confirm_target) {
-            if (borg_cfg[BORG_VERBOSE])
-                borg_note("# Expected request for Direction.");
-            /* reset the flag */
-            borg_confirm_target = false;
-            /* Return queued target */
-            key.code = borg_get_queued_direction();
+    /* handle the messages the borg has to react to immediately */
+    if (borg_prompt && !inkey_flag && strlen(buf)) {
+        if (borg_react_prompted(buf, &key, x, y))
             return key;
-        } else {
-            borg_note("** UNEXPECTED REQUEST FOR DIRECTION Dumping keypress history ***");
-            borg_note(format("** line starting <%s> ***", buf));
-            borg_dump_recent_keys(20);
-            borg_oops("unexpected request for direction");
-            /* Hack -- Escape */
-            key.code = ESCAPE;
-            return key;
-        }
-    }
-
-    /* Stepping on a stack when the inventory is full gives a message */
-    /* and the keypress when given this message is requeued so the borg */
-    /* thinks it is a user keypress when it isn't */
-    if (borg_prompt && !inkey_flag && (y == 0) && (x >= 12)
-        && (prefix(buf, "You have no room"))) {
-        if (borg_cfg[BORG_VERBOSE])
-            borg_note("# 'You have no room' is a no-op");
-        /* key code 0 seems to be a no-op and ignored as a user keypress */
-        key.code = 0;
-        return key;
-    }
-
-    /* ***MEGA-HACK***  */
-    /* This will be hit if the borg uses an unidentified effect that has */
-    /* EF_SELECT/multiple effects. Always pick "one of the following at random"
-     */
-    /* when the item is used post ID, an effect will be selected */
-    if (borg_prompt && !inkey_flag && !borg_inkey(false) && (y == 1)
-        && prefix(buf, "Which effect?")) {
-        if (borg_cfg[BORG_VERBOSE])
-            borg_note("# Use of unknown object with multiple effects");
-        /* the first selection (a) is random */
-        key.code = 'a';
-        return key;
-    }
-
-    /* prompt for stepping in lava.  This should be avoided but */
-    /* if the borg is stuck, give him a pass */
-    if (borg_prompt && !inkey_flag && (y == 0) && (x >= 12)
-        && (prefix(buf, "The lava will") || prefix(buf, "Lava blocks y"))) {
-        if (borg_cfg[BORG_VERBOSE])
-            borg_note("# ignoring Lava warning");
-        /* yes step in */
-        key.code = 'y';
-        return key;
     }
 
     /* Mega-Hack -- Handle death */
@@ -795,8 +669,6 @@ void do_cmd_borg(void)
         /* Step forever */
         borg_step = 0;
 
-        borg_notice(true);
-
         if (player->opts.lazymove_delay != 0) {
             borg_note("# Turning off lazy movement controls");
             player->opts.lazymove_delay = 0;
@@ -880,37 +752,58 @@ void do_cmd_borg(void)
     case 'f':
     case 'F': {
         /* Get a "Borg command", or abort */
-        if (!get_com("Borg command: Toggle Flag: (m/d/s/f/g) ", &cmd))
+        if (!get_com("Borg command: Toggle Flag: (b/c/k/l/s/v) ", &cmd))
             return;
 
         switch (cmd) {
-            /* Give borg thought messages in window */
-        case 'm':
-        case 'M': {
-            msg("Command No Longer Useful");
+        /* stop when alert bell rings */
+        case 'b':
+        case 'B': {
+            borg_cfg[BORG_STOP_ON_BELL] = !borg_cfg[BORG_STOP_ON_BELL];
+            msg("Borg -- borg_stop_on_bell is now %d.",
+                borg_cfg[BORG_STOP_ON_BELL]);
             break;
         }
 
-        /* Give borg the ability to use graphics ----broken */
-        case 'g':
-        case 'G': {
-            borg_graphics = !borg_graphics;
-            msg("Borg -- borg_graphics is now %d.", borg_graphics);
+        /* self scum */
+        case 'c':
+        case 'C': {
+            borg_cfg[BORG_SELF_SCUM] = !borg_cfg[BORG_SELF_SCUM];
+            msg("Borg -- borg_self_scum is now %d.", borg_cfg[BORG_SELF_SCUM]);
+            break;
+        }
+
+        /* Stop when the borg wins */
+        case 'k':
+        case 'K': {
+            borg_cfg[BORG_STOP_KING] = !borg_cfg[BORG_STOP_KING];
+            msg("Borg -- borg_stop_king is now %d.", borg_cfg[BORG_STOP_KING]);
+            break;
+        }
+
+        /* Stop when the borg wins */
+        case 'l':
+        case 'L': {
+            borg_cfg[BORG_LUNAL_MODE] = !borg_cfg[BORG_LUNAL_MODE];
+            msg("Borg -- borg_lunal_mode is now %d.",
+                borg_cfg[BORG_LUNAL_MODE]);
             break;
         }
 
         /* Dump savefile at each level */
         case 's':
         case 'S': {
-            borg_flag_save = !borg_flag_save;
-            msg("Borg -- borg_flag_save is now %d.", borg_flag_save);
+            borg_cfg[BORG_AUTOSAVE] = !borg_cfg[BORG_AUTOSAVE];
+            msg("Borg -- borg_autosave is now %d.", borg_cfg[BORG_AUTOSAVE]);
             break;
         }
 
-        /* clear 'fear' levels */
-        case 'f':
-        case 'F': {
-            msg("Command No Longer Useful");
+        /* verbose mode */
+        case 'v':
+        case 'V':
+        {
+            borg_cfg[BORG_VERBOSE] = !borg_cfg[BORG_VERBOSE];
+            msg("Borg -- borg_verbose is now %d.", borg_cfg[BORG_VERBOSE]);
             break;
         }
         }

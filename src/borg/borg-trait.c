@@ -782,7 +782,6 @@ const char *prefix_pref[] = {
     "clevel",
     "max clevel",
     "esp",
-    "cur light",
     "recall",
     "food",
     "food high",
@@ -985,7 +984,7 @@ const char *prefix_pref[] = {
     "amt detect evil",
     "amt magic map",
     "amt recharge",
-    "amt lite",
+    "amt call lite",
     "amt prot evil", /* Protection from Evil */
     "amt glyph", /* Rune Protection */
     "amt potion ccw", /* CCW potions (just because we use it so often) */
@@ -1123,6 +1122,11 @@ static void borg_notice_ammo(int slot)
     /* Skip empty items */
     if (!item->iqty)
         return;
+
+
+    /* number of inventory slots the quiver used  */
+    if (slot >= QUIVER_START)
+        borg.trait[BI_QUIVER_SLOTS]++;
 
     /* total up the weight of the items */
     borg.trait[BI_WEIGHT] += borg_item_weight(item);
@@ -1507,15 +1511,23 @@ static void borg_notice_equipment(void)
         extra_might += item->modifiers[OBJ_MOD_MIGHT];
 
         /* Item makes player glow or has a light radius  */
-        if (item->modifiers[OBJ_MOD_LIGHT]) {
-            /* Special case for Torches/Lantern of Brightness, they are not
-             * perm. */
-            if (item->tval == TV_LIGHT
-                && (item->sval == sv_light_torch
-                    || item->sval == sv_light_lantern)
-                && !item->timeout)
-                borg.trait[BI_LIGHT]++;
+        borg.trait[BI_LIGHT] += item->modifiers[OBJ_MOD_LIGHT];
+
+        /* LIGHT_2 and LIGHT_3 */
+        if (of_has(item->flags, OF_LIGHT_2)) {
+            borg.trait[BI_LIGHT] += 2;
+        } else if (of_has(item->flags, OF_LIGHT_3)) {
+            borg.trait[BI_LIGHT] += 3;
         }
+
+        /* people with "unlight" can use radius 1 light artifacts */
+        if ((item->modifiers[OBJ_MOD_LIGHT] > 0) 
+            && (borg.trait[BI_CLASS] == CLASS_NECROMANCER))
+            borg.trait[BI_LIGHT]--;
+ 
+        /* Light from items with no fuel don't count  */
+        if (i == INVEN_LIGHT && (item->timeout || of_has(item->flags, OF_NO_FUEL)))
+            borg.trait[BI_LIGHT] += item->modifiers[OBJ_MOD_LIGHT];
 
         /* Boost mod moves */
         borg.trait[BI_MOD_MOVES] += item->modifiers[OBJ_MOD_MOVES];
@@ -1627,10 +1639,6 @@ static void borg_notice_equipment(void)
             borg.trait[BI_RCONF] = true;
         if (of_has(item->flags, OF_PROT_BLIND))
             borg.trait[BI_RBLIND] = true;
-
-        /* assume all light artifacts give off light */
-        if (item->tval == TV_LIGHT && item->art_idx)
-            borg.trait[BI_LIGHT]++;
 
         /* Immunity flags */
         /* if you are immune you automatically resist */
@@ -1748,6 +1756,12 @@ static void borg_notice_equipment(void)
         borg.trait[BI_TOHIT] += item->to_h;
         borg.trait[BI_TODAM] += item->to_d;
     }
+
+    /* if the player has unlight count them as having light if they have none */
+    if ((borg.trait[BI_CLASS] == CLASS_NECROMANCER)
+        && borg.trait[BI_LIGHT] <= 0)
+        borg.trait[BI_LIGHT] = 1;
+
 
     if (borg.trait[BI_CRSVULN]) {
         borg.trait[BI_CRSAGRV] = true;
@@ -2131,31 +2145,6 @@ static void borg_notice_equipment(void)
         }
     }
 
-    /* Examine the lite */
-    item = &borg_items[INVEN_LIGHT];
-
-    if (item->iqty) {
-        /* Assume normal lite radius */
-        borg.trait[BI_CURLITE] = 0;
-
-        /* Glowing player has light */
-        if (borg.trait[BI_LIGHT])
-            borg.trait[BI_CURLITE] = borg.trait[BI_LIGHT];
-
-        /* Lite */
-        if (item->tval == TV_LIGHT) {
-            if (item->timeout || of_has(item->flags, OF_NO_FUEL)) {
-                if (of_has(item->flags, OF_LIGHT_2)) {
-                    borg.trait[BI_CURLITE] = borg.trait[BI_CURLITE] + 2;
-                } else if (of_has(item->flags, OF_LIGHT_3)) {
-                    borg.trait[BI_CURLITE] = borg.trait[BI_CURLITE] + 3;
-                }
-            }
-        }
-
-        borg.trait[BI_CURLITE] += item->modifiers[OBJ_MOD_LIGHT];
-    }
-
     /* Special way to handle See Inv */
     if (borg.see_inv >= 1)
         borg.trait[BI_SINV] = true;
@@ -2242,7 +2231,7 @@ static void borg_notice_inventory(void)
         }
 
         /* Hack -- skip un-aware items */
-        if (!item->kind)
+        if (!item->aware)
             continue;
 
         /* count up the items on the borg (do not count artifacts  */
@@ -2293,10 +2282,6 @@ static void borg_notice_inventory(void)
         case TV_FOOD:
             /* Analyze */
             {
-                /* unknown types */
-                if (!item->kind)
-                    break;
-
                 /* check for food that hurts us */
                 if (borg_obj_has_effect(item->kind, EF_CRUNCH, -1)
                     || borg_obj_has_effect(
@@ -2490,15 +2475,12 @@ static void borg_notice_inventory(void)
         case TV_STAFF:
             /* Analyze */
             if (item->sval == sv_staff_teleportation) {
-                if (borg.trait[BI_MAXDEPTH] <= 95) {
-                    borg.trait[BI_AESCAPE] += (item->iqty);
-                    if (borg_activate_failure(item->tval, item->sval) < 500) {
-                        borg.trait[BI_AESCAPE] += item->pval;
-                    }
+                borg.trait[BI_AESCAPE] += (item->iqty);
+                if (borg_activate_failure(item->tval, item->sval) < 500) {
+                    borg.trait[BI_AESCAPE] += item->pval;
                 }
             } else if (item->sval == sv_staff_speed) {
-                if (borg.trait[BI_MAXDEPTH] <= 95)
-                    borg.trait[BI_ASPEED] += item->pval;
+                borg.trait[BI_ASPEED] += item->pval;
             } else if (item->sval == sv_staff_healing)
                 borg.trait[BI_AHEAL] += item->pval;
             else if (item->sval == sv_staff_the_magi)
@@ -2800,7 +2782,8 @@ static void borg_notice_inventory(void)
     /*** Process the Needs ***/
 
     /* No need for fuel if we know it doesn't need it */
-    if (of_has(borg_items[INVEN_LIGHT].flags, OF_NO_FUEL))
+    if (of_has(borg_items[INVEN_LIGHT].flags, OF_NO_FUEL)
+        || (borg.trait[BI_CLASS] == CLASS_NECROMANCER))
         borg.trait[BI_AFUEL] += 1000;
 
     /* No need to *buy* stat increase potions */
@@ -2869,12 +2852,6 @@ void borg_notice(bool notice_swap)
 
     /* Notice the inventory */
     borg_notice_inventory();
-
-    /* number of inventory slots the quiver used  */
-    borg.trait[BI_QUIVER_SLOTS]
-        = (borg.trait[BI_AMMO_COUNT] - 1) / z_info->quiver_slot_size + 1;
-
-    borg.trait[BI_EMPTY] -= borg.trait[BI_QUIVER_SLOTS];
 
     /* Notice and locate my swap weapon */
     if (notice_swap) {

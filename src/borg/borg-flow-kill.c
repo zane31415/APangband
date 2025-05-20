@@ -839,7 +839,7 @@ static int borg_new_kill(unsigned int r_idx, int y, int x)
     }
 
     /* Wipe goals only if I have some light source */
-    if (borg.trait[BI_CURLITE]
+    if (borg.trait[BI_LIGHT]
         && borg_los(kill->pos.y, kill->pos.x, borg.c.y, borg.c.x))
         borg.goal.type = 0;
 
@@ -1683,7 +1683,8 @@ bool borg_flow_kill(bool viewable, int nearness)
         return false;
 
     /* Don't chase down town monsters when you are just starting out */
-    if (borg.trait[BI_CDEPTH] == 0 && borg.trait[BI_CLEVEL] < 20)
+    if (borg.trait[BI_CDEPTH] == 0 && borg.trait[BI_CLEVEL] < 20
+        && !borg_cfg[BORG_MONEY_SCUM_AMOUNT])
         return false;
 
     /* YOU ARE NOT A WARRIOR!! DON'T ACT LIKE ONE!! */
@@ -2187,7 +2188,7 @@ bool borg_flow_kill_corridor(bool viewable)
         return false;
 
     /* Not when darkened */
-    if (borg.trait[BI_CURLITE] == 0)
+    if (borg.trait[BI_LIGHT] == 0)
         return false;
 
     /* Not if sitting in a sea of runes */
@@ -2598,7 +2599,7 @@ bool borg_flow_kill_direct(bool viewable, bool twitchy)
         return false;
 
     /* Not when darkened */
-    if (borg.trait[BI_CURLITE] == 0)
+    if (borg.trait[BI_LIGHT] == 0)
         return false;
 
     /* Efficiency -- Nothing to kill */
@@ -2914,7 +2915,7 @@ bool borg_shoot_scoot_safe(int emergency, int turns, int b_p)
         return false;
 
     /* Not if No Light */
-    if (!borg.trait[BI_CURLITE])
+    if (!borg.trait[BI_LIGHT])
         return false;
 
     /* Cheat the floor grid */

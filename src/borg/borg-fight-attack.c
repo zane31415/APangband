@@ -1104,6 +1104,19 @@ static int borg_launch_damage_one(int i, int dam, int typ, int ammo_location)
                 dam = kill->power - sp_drain;
         }
         break;
+
+    case BORG_ATTACK_CURSE:
+        dam = ((borg.trait[BI_CLEVEL] / 12) * ((50 + kill->injury) + 1)) / 2;
+        break;
+
+	case BORG_ATTACK_ELEC_STRIKE:
+		if (rf_has(r_ptr->flags, RF_IM_ELEC))
+			dam = 0;
+        /* don't let lightning strike pass through unknown squares */
+		else if (!borg_projectable_pure(borg.c.y, borg.c.x, kill->pos.y, 
+            kill->pos.x))
+			dam = 0;
+		break;
     }
 
     /* use Missiles on certain types of monsters */
@@ -1726,9 +1739,10 @@ int borg_launch_bolt(int rad, int dam, int typ, int max, int ammo_location)
                      */
                     n = borg_danger(borg.c.y, borg.c.x, 1, true, false);
 
-                    /* Skip Offsets that do only 1 damage */
-                    if (n == 1)
-                        n = -10;
+                    /* since this is the danger after monster removal */
+                    /* and dam for tel away is the previous danger */
+                    /* we want the biggest reduction in danger */
+                    n = dam - n;
                 }
 
                 /* Reset Teleport Other variables */
@@ -2229,25 +2243,6 @@ static int borg_attack_aux_rest(void)
     return 1;
 }
 
-/* look for a throwable item */
-static bool borg_has_throwable(void)
-{
-    int i;
-    for (i = 0; i < QUIVER_END; i++) {
-        /* it will show wield in the list */
-        /* but not if that is the only thing */
-        if (i == INVEN_WIELD)
-            continue;
-
-        if (!borg_items[i].iqty)
-            continue;
-
-        if (of_has(borg_items[i].flags, OF_THROWING))
-            return true;
-    }
-    return false;
-}
-
 /*
  * Simulate/Apply the optimal result of throwing an object
  *
@@ -2349,9 +2344,6 @@ static int borg_attack_aux_object(void)
     /* Fire */
     borg_keypress('v');
 
-    if (borg_has_throwable())
-        borg_keypress('/');
-
     /* Use the object */
     borg_keypress(all_letters_nohjkl[b_k]);
 
@@ -2387,10 +2379,6 @@ int borg_attack_aux_spell_bolt(
                 && borg.trait[BI_CLASS] != CLASS_NECROMANCER)
             && borg.trait[BI_CLEVEL] <= 2)
         && (randint0(100) < 1))
-        return 0;
-
-    /* Not if money scumming in town */
-    if (borg_cfg[BORG_MONEY_SCUM_AMOUNT] && borg.trait[BI_CDEPTH] == 0)
         return 0;
 
     /* Not if low on food */
@@ -2914,7 +2902,7 @@ static int borg_attack_aux_wand_bolt_unknown(int dam, int typ)
             continue;
 
         /* known */
-        if (borg_items[i].kind)
+        if (borg_items[i].aware)
             continue;
 
         /* No charges */
@@ -2982,7 +2970,7 @@ static int borg_attack_aux_rod_bolt_unknown(int dam, int typ)
             continue;
 
         /* known */
-        if (borg_items[i].kind)
+        if (borg_items[i].aware)
             continue;
 
         /* No charges */
@@ -3271,6 +3259,9 @@ static int borg_attack_aux_leap_into_battle(void)
     if (borg.trait[BI_ISAFRAID] || borg.trait[BI_CRSFEAR])
         return 0;
 
+    if (target_closest < 10)
+        return 0;
+
     /* Examine possible destinations */
     for (i = 0; i < borg_temp_n; i++) {
         int blows;
@@ -3483,110 +3474,6 @@ static int borg_attack_aux_maim_foe(void)
     borg_keypress(I2D(dir));
 
     return d;
-}
-
-/* trying the Curse spell */
-static int borg_attack_aux_curse(void)
-{
-    int p;
-
-    int i, b_i = -1;
-    int d, b_d = -1;
-
-    borg_grid *ag;
-
-    borg_kill *kill;
-
-    /* costs 100hp to cast.  Don't kill yourself doing it */
-    if (borg.trait[BI_CURHP] < 120)
-        return 0;
-
-    /* Can I do it */
-    if (!borg_spell_okay_fail(CURSE, (borg_fighting_unique ? 40 : 25)))
-        return 0;
-
-    /* Too afraid to attack */
-    if (borg.trait[BI_ISAFRAID] || borg.trait[BI_CRSFEAR])
-        return 0;
-
-    /* Examine possible kills */
-    for (i = 0; i < borg_temp_n; i++) {
-        int x = borg_temp_x[i];
-        int y = borg_temp_y[i];
-
-        /* Acquire grid */
-        ag = &borg_grids[y][x];
-
-        /* Obtain the monster */
-        kill = &borg_kills[ag->kill];
-
-        /* Calculate "average" damage */
-        d = (((((kill->injury * kill->power) / 100) + 1) / 2) + 50)
-            * (borg.trait[BI_CLEVEL] / 12 + 1);
-
-        /* No damage */
-        if (d <= 0)
-            continue;
-
-        /* Hack -- avoid waking most "hard" sleeping monsters */
-        if (!kill->awake && (d <= kill->power) && !borg.munchkin_mode) {
-            /* Calculate danger */
-            p = borg_danger_one_kill(y, x, 1, ag->kill, true, true);
-
-            if (p > avoidance * 2)
-                continue;
-        }
-
-        /* Hack -- ignore sleeping town monsters */
-        if (!borg.trait[BI_CDEPTH] && !kill->awake)
-            continue;
-
-        /* Calculate "danger" to player */
-        p = borg_danger_one_kill(borg.c.y, borg.c.x, 2, ag->kill, true, true);
-
-        /* Reduce "bonus" of partial kills when higher level */
-        if (d <= kill->power && borg.trait[BI_MAXCLEVEL] > 15)
-            p = p / 10;
-
-        /* Add the danger-bonus to the damage */
-        d += p;
-
-        /* Ignore lower damage */
-        if ((b_i >= 0) && (d < b_d))
-            continue;
-
-        /* Save the info */
-        b_i = i;
-        b_d = d;
-    }
-
-    /* Nothing to attack */
-    if (b_i <= 0)
-        return 0;
-
-    /* Simulation */
-    if (borg_simulate)
-        return b_d;
-
-    /* Save the location */
-    borg.goal.g.x = borg_temp_x[b_i];
-    borg.goal.g.y = borg_temp_y[b_i];
-
-    ag            = &borg_grids[borg.goal.g.y][borg.goal.g.x];
-    kill          = &borg_kills[ag->kill];
-
-    /* Attack the grid */
-    borg_target(borg.goal.g);
-    borg_spell(CURSE);
-
-    /* Use target */
-    borg_keypress('5');
-
-    /* Set our shooting flag */
-    successful_target = -1;
-
-    /* Success */
-    return b_d;
 }
 
 /* trying the Vampire Strike spell */
@@ -4097,8 +3984,8 @@ int borg_calculate_attack_effectiveness(int attack_type)
         rad = 0;
         dam = ((borg.trait[BI_CLEVEL] / 4) * (4 + 1) / 2)
               + borg.trait[BI_CLEVEL] + 5; /* HACK pretend it is all elec */
-        return (borg_attack_aux_spell_bolt(
-            LIGHTNING_STRIKE, rad, dam, BORG_ATTACK_ELEC, z_info->max_range, false));
+        return (borg_attack_aux_spell_bolt(LIGHTNING_STRIKE, rad, dam,
+            BORG_ATTACK_ELEC_STRIKE, z_info->max_range, false));
 
     /* Spell -- Earth Rising */
     case BF_SPELL_EARTH_RISING:
@@ -4126,14 +4013,14 @@ int borg_calculate_attack_effectiveness(int attack_type)
         return (borg_attack_aux_spell_bolt(
             RIVER_OF_LIGHTNING, rad, dam, BORG_ATTACK_PLASMA, 20, true));
 
-    /* spell -- Spear of Oromë */
+    /* spell -- Spear of Orom(e + diaresis) */
     case BF_SPELL_SPEAR_OF_OROME:
         rad = 0;
         dam = ((borg.trait[BI_CLEVEL] / 2) + (8 + 1)) / 2;
         return (borg_attack_aux_spell_bolt(
             SPEAR_OF_OROME, rad, dam, BORG_ATTACK_HOLY_ORB, z_info->max_range, false));
 
-    /* spell -- Light of Manwë */
+    /* spell -- Light of Manw(e + diaresis) */
     case BF_SPELL_LIGHT_OF_MANWE:
         rad = 0;
         dam = borg.trait[BI_CLEVEL] * 5 + 100;
@@ -4210,7 +4097,15 @@ int borg_calculate_attack_effectiveness(int attack_type)
 
     /* Spell - Curse */
     case BF_SPELL_CURSE:
-        return (borg_attack_aux_curse());
+        /* costs 100hp to cast.  Don't kill yourself doing it */
+        if (borg.trait[BI_CURHP] < 120)
+            return 0;
+
+        rad = 0;
+        dam = -1;
+
+        return (borg_attack_aux_spell_bolt(
+            CURSE, rad, dam, BORG_ATTACK_CURSE, z_info->max_range, false));
 
     /* spell - Whirlwind Attack */
     case BF_SPELL_WHIRLWIND_ATTACK:
@@ -4504,12 +4399,12 @@ int borg_calculate_attack_effectiveness(int attack_type)
         return (borg_attack_aux_activation(
             act_fire_bolt, rad, dam, BORG_ATTACK_FIRE, true, -1));
 
-    /* Artifact -- Anduril & Firestar- fire bolt 72*/
-    case BF_ACT_FIRE_BOLT72:
-        rad = 0;
+    /* Artifact -- Anduril & Firestar- fire ball 72*/
+    case BF_ACT_FIRE_BALL72:
+        rad = 2;
         dam = 72;
         return (borg_attack_aux_activation(
-            act_fire_bolt72, rad, dam, BORG_ATTACK_FIRE, true, -1));
+            act_fire_ball72, rad, dam, BORG_ATTACK_FIRE, true, -1));
 
     /* Artifact -- Gothmog- FIRE BALL 144 */
     case BF_ACT_FIRE_BALL:
@@ -4532,7 +4427,7 @@ int borg_calculate_attack_effectiveness(int attack_type)
         return (borg_attack_aux_activation(
             act_cold_ball50, rad, dam, BORG_ATTACK_COLD, true, -1));
 
-    /* Artifact -- Aranrúth- frost bolt 12d8*/
+    /* Artifact -- Aranr(u + acute accent)th- frost bolt 12d8*/
     case BF_ACT_COLD_BOLT2:
         rad = 0;
         dam = (12 * (8 + 1) / 2);
@@ -4614,7 +4509,7 @@ int borg_calculate_attack_effectiveness(int attack_type)
         return (borg_attack_aux_activation(
             act_dispel_evil, rad, dam, BORG_ATTACK_DISP_EVIL, true, -1));
 
-    /* Artifact -- Eöl -- Mana Bolt 12d8 */
+    /* Artifact -- E(o + diaresis)l -- Mana Bolt 12d8 */
     case BF_ACT_MANA_BOLT:
         rad = 0;
         dam = (12 * (8 + 1)) / 2;
@@ -4658,7 +4553,7 @@ int borg_calculate_attack_effectiveness(int attack_type)
         rad = 0;
         dam = 60;
         return (borg_attack_aux_activation(
-            act_sleep_all, rad, dam, BORG_ATTACK_OLD_SLEEP, false, -1));
+            act_sleep_all, rad, dam, BORG_ATTACK_OLD_SLEEP, true, -1));
 
     case BF_ACT_FEAR_MONSTER:
         rad = 0;
@@ -5298,7 +5193,7 @@ bool borg_attack(bool boosted_bravery)
                        || borg_time_town + (borg_t - borg_began) >= 3000) {
                 /* Try to fight been there too long. */
             } else if (boosted_bravery || borg.no_retreat >= 1
-                       || borg.goal.recalling) {
+                       || borg.goal.recalling || borg.goal.descending) {
                 /* Try to fight if being Boosted or recall engaged. */
                 borg_note("# Bored, or recalling and fighting a monster on "
                           "Scaryguy Level.");

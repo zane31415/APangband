@@ -36,6 +36,7 @@
 #include "borg-trait.h"
 #include "borg-update.h"
 #include "borg.h"
+#include "borg-prepared.h"
 
 /*
  * Determine "twice" the distance between two points
@@ -58,51 +59,60 @@ bool borg_recall(void)
         if (borg_zap_rod(sv_rod_recall) || borg_activate_item(act_recall)
             || borg_spell_fail(WORD_OF_RECALL, 60)
             || borg_read_scroll(sv_scroll_word_of_recall)) {
-            /* Do reset depth at certain times. */
-            if (borg.trait[BI_CDEPTH] < borg.trait[BI_MAXDEPTH]
-                && ((borg.trait[BI_MAXDEPTH] >= 60
-                        && borg.trait[BI_CDEPTH] >= 40)
-                    || (borg.trait[BI_CLEVEL] < 48
-                        && borg.trait[BI_CDEPTH] >= borg.trait[BI_MAXDEPTH] - 3)
-                    || (borg.trait[BI_CLEVEL] < 48
-                        && borg.trait[BI_CDEPTH] >= 15
-                        && borg.trait[BI_MAXDEPTH] - borg.trait[BI_CDEPTH]
-                               > 10))) {
-                /* Special check on deep levels */
-                if (borg.trait[BI_CDEPTH] >= 80 && borg.trait[BI_CDEPTH] < 100
-                    && /* Deep */
-                    borg_race_death[borg_sauron_id] != 0) /* Sauron is Dead */
-                {
-                    /* Do reset Depth */
-                    borg_note("# Resetting recall depth.");
-                    borg_keypress('y');
-                } else if (borg.goal.fleeing_munchkin == true) {
-                    /* Do not reset Depth */
-                    borg_note("# Resetting recall depth during munchkin mode.");
-                    borg_keypress('y');
-                } else if (borg.trait[BI_CDEPTH] >= 100
-                           && !borg.trait[BI_KING]) {
-                    /* Do reset Depth */
-                    borg_note("# Not Resetting recall depth.");
-                    borg_keypress('n');
-                } else if (borg.trait[BI_MAXDEPTH] == 99) {
-                    /* Do reset Depth, cleaning up last uniques to hit */
-                    /* Morgoth.  Want to keep using up the stock of potions */
-                    borg_note("# Not Resetting recall depth.");
-                    borg_keypress('n');
-                } else {
-                    /* Do reset Depth */
-                    borg_note("# Resetting recall depth.");
-                    borg_keypress('y');
-                }
-            }
 
-            /* reset recall depth in dungeon? */
-            else if (borg.trait[BI_CDEPTH] < borg.trait[BI_MAXDEPTH]
-                     && borg.trait[BI_CDEPTH] != 0) {
-                /* Do not reset Depth */
-                borg_note("# Not resetting recall depth.");
-                borg_keypress('n');
+            /* do we need to answer "Set recall depth to current depth? [y/n]" */
+            if (borg.trait[BI_CDEPTH] < borg.trait[BI_MAXDEPTH]
+                && borg.trait[BI_CDEPTH] != 0) {
+
+                int diff_max_from_desired_depth
+                    = borg.trait[BI_MAXDEPTH] - borg_depth_hunted_unique;
+                int diff_cur_from_desired_depth
+                    = borg.trait[BI_CDEPTH] - borg_depth_hunted_unique;
+
+                /* Reset max depth when current depth is way deeper (5) than the */
+                /* third deepest unique. */
+                if (diff_max_from_desired_depth > 5
+                    && diff_cur_from_desired_depth <= 5
+                    && diff_cur_from_desired_depth > -5) {
+                    /* Special check on deep levels */
+                    if (borg.trait[BI_CDEPTH] >= 80 && borg.trait[BI_CDEPTH] < 100
+                        && /* Deep */
+                        borg_race_death[borg_sauron_id] != 0) /* Sauron is Dead */
+                    {
+                        /* Do reset Depth */
+                        borg_note("# Resetting recall depth.");
+                        borg_keypress('y');
+                    }
+                    else if (borg.goal.fleeing_munchkin == true) {
+                        /* Do reset Depth */
+                        borg_note("# Resetting recall depth during munchkin mode.");
+                        borg_keypress('y');
+                    }
+                    else if (borg.trait[BI_CDEPTH] >= 100
+                        && !borg.trait[BI_KING]) {
+                        /* Do not reset Depth */
+                        borg_note("# Not Resetting recall depth.");
+                        borg_keypress('n');
+                    }
+                    else if (borg.trait[BI_MAXDEPTH] == 99
+                        && borg_numb_live_unique < 5) {
+                        /* Do reset Depth, cleaning up last uniques to hit */
+                        /* Morgoth.  Want to keep using up the stock of potions */
+                        borg_note("# Not Resetting recall depth.");
+                        borg_keypress('n');
+                    }
+                    else {
+                        /* Do reset Depth */
+                        borg_note("# Resetting recall depth.");
+                        borg_keypress('y');
+                    }
+                }
+                /* reset recall depth in dungeon? */
+                else {
+                    /* Do not reset Depth */
+                    borg_note("# Not resetting recall depth.");
+                    borg_keypress('n');
+                }
             }
 
             borg_keypress(ESCAPE);
@@ -609,6 +619,24 @@ bool borg_dimension_door(int allow_fail)
     return false;
 }
 
+static bool borg_teleport_off_level(void)
+{
+    /* don't if we are already recalling or waiting for */
+    /* deep descent */
+    if (!(borg.goal.recalling || borg.goal.descending)) {
+        /* teleport level before deep descent because there is no delay */
+        if (borg_read_scroll(sv_scroll_teleport_level)
+            || borg_activate_item(act_tele_level))
+            return true;
+
+        if (borg_activate_item(act_deep_descent)
+            || borg_read_scroll(sv_scroll_deep_descent))
+            return true;
+    }
+
+    return false;
+}
+
 /*
  * Try to phase door or teleport
  * b_q is the danger of the least dangerous square around us.
@@ -679,10 +707,8 @@ bool borg_escape(int b_q)
      * benefit of rising to town.
      */
     if (borg.trait[BI_ISWEAK] && borg.trait[BI_CDEPTH] == 1) {
-        if (borg_read_scroll(sv_scroll_teleport_level)
-            || borg_activate_item(act_tele_level)
-            || borg_read_scroll(sv_scroll_deep_descent)) {
-            borg_note("# Attempting to leave via teleport level");
+        if (borg_teleport_off_level()) {
+            borg_note("# Attempting to leave via teleport level/deep descent");
             return true;
         }
     }
@@ -719,14 +745,12 @@ bool borg_escape(int b_q)
                     || borg_spell_fail(PORTAL, tmp_allow_fail - 10)
                     || borg_shadow_shift(tmp_allow_fail - 10)
                     || borg_read_scroll(sv_scroll_teleport)
-                    || borg_read_scroll(sv_scroll_teleport_level)
                     || borg_use_staff_fail(sv_staff_teleportation)
                     || borg_activate_item(act_tele_long)
-                    || borg_activate_item(act_tele_level) 
-                    || borg_read_scroll(sv_scroll_deep_descent) ||
+                    || borg_teleport_off_level()
 
                     /* revisit spells, increased fail rate */
-                    borg_dimension_door(tmp_allow_fail + 9)
+                    || borg_dimension_door(tmp_allow_fail + 9)
                     || borg_spell_fail(TELEPORT_SELF, tmp_allow_fail + 9)
                     || borg_spell_fail(PORTAL, tmp_allow_fail + 9)
                     || borg_shadow_shift(tmp_allow_fail + 9) ||
@@ -836,13 +860,10 @@ bool borg_escape(int b_q)
                     || borg_use_staff_fail(sv_staff_teleportation)
                     || borg_activate_item(act_tele_long)
                     || borg_read_scroll(sv_scroll_teleport)
-                    || borg_read_scroll(sv_scroll_teleport_level)
                     || borg_dimension_door(allow_fail)
-                    || borg_activate_item(act_tele_level)
                     || borg_spell_fail(TELEPORT_SELF, allow_fail)
                     || borg_spell_fail(PORTAL, allow_fail)
                     || borg_shadow_shift(allow_fail)
-                    || borg_read_scroll(sv_scroll_deep_descent)
                     || borg_use_staff(sv_staff_teleportation)))) {
             /* Flee! */
             borg_note("# Danger Level 2.1");
@@ -938,9 +959,7 @@ bool borg_escape(int b_q)
         }
 
         /* Use Tport Level after the above attempts failed. */
-        if (borg_read_scroll(sv_scroll_teleport_level)
-            || borg_activate_item(act_tele_level)
-            || borg_read_scroll(sv_scroll_deep_descent)) {
+        if (borg_teleport_off_level()) {
             /* Flee! */
             borg_note("# Danger Level 3.4");
 
@@ -1244,8 +1263,7 @@ bool borg_escape(int b_q)
                 || borg_activate_item(act_tele_long)
                 || borg_read_scroll(sv_scroll_teleport)
                 || borg_use_staff_fail(sv_staff_teleportation)
-                || borg_read_scroll(sv_scroll_teleport_level)
-                || borg_read_scroll(sv_scroll_deep_descent))) {
+                || borg_teleport_off_level())) {
             /* Flee! */
             borg_note("# Danger Level 8");
 

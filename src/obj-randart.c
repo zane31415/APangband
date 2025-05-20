@@ -1412,6 +1412,28 @@ static void artifact_prep(struct artifact *art, const struct object_kind *kind,
 	art->activation = NULL;
 	string_free(art->alt_msg);
 	art->alt_msg = NULL;
+	/*
+	 * If the kind has an activation, inherit that activation's level.
+	 * If the kind has an effect, inherit the kind's level.  For artifacts,
+	 * the calculation for the activation's failure rate or damage boost,
+	 * always uses the artifact's level (see obj-util.c's
+	 * get_use_device_chance() and cmd-obj.c's use_aux()).  The recharge
+	 * time is always drawn from the object representing the artifact
+	 * (see cmd-obj.c's use_aux()), and that object only picks up the
+	 * recharge time from the artifact if the artifact has an activation
+	 * of its own (see obj-make.c's copy_artifact_data()).
+	 */
+	if (kind->activation) {
+		art->level = kind->activation->level;
+	} else if (kind->effect) {
+		art->level = kind->level;
+	} else {
+		art->level = 0;
+	}
+	art->time.base = 0;
+	art->time.dice = 0;
+	art->time.sides = 0;
+	art->time.m_bonus = 0;
 	for (i = 0; i < OBJ_MOD_MAX; i++) {
 		art->modifiers[i] = randcalc(kind->modifiers[i], 0, MINIMISE);
 	}
@@ -2078,6 +2100,7 @@ static void add_activation(struct artifact *art, int target_power,
 			100 * p / max_effect < 200 * target_power / max_power) {
 			file_putf(log_file, "Adding activation effect %d\n", x);
 			art->activation = &activations[x];
+			art->level = art->activation->level;
 			art->time.base = (p * 8);
 			art->time.dice = (p > 5 ? p / 5 : 1);
 			art->time.sides = p;
@@ -2898,6 +2921,15 @@ static void design_artifact(struct artifact_set_data *data, int tv, int *aidx)
 	/* Sanity check */
 	art->alloc_max = MAX(art->alloc_max, MIN(art->alloc_min * 2, 127));
 
+	/*
+	 * If there is no activation or effect from the kind, level currently
+	 * does nothing.  Set it to alloc_min in case changes elsewhere start
+	 * using level for the artifact.
+	 */
+	if (!art->activation && !kind->activation && !kind->effect) {
+		art->level = art->alloc_min;
+	}
+
 	file_putf(log_file, "New depths are min %d, max %d\n", art->alloc_min,
 			  art->alloc_max);
 	file_putf(log_file, "Power-based alloc_prob is %d\n", art->alloc_prob);
@@ -3038,7 +3070,14 @@ static void write_randart_entry(ang_file *fff, const struct artifact *art)
 	/* Output graphics if necessary */
 	if (kind->kidx >= z_info->ordinary_kind_max) {
 		const char *attr = attr_to_text(kind->d_attr);
-		file_putf(fff, "graphics:%c:%s\n", kind->d_char, attr);
+		char *d_char = mem_alloc(text_wcsz() + 1);
+		int nbyte = text_wctomb(d_char, kind->d_char);
+
+		if (nbyte > 0) {
+			d_char[nbyte] = '\0';
+			file_putf(fff, "graphics:%s:%s\n", d_char, attr);
+		}
+		mem_free(d_char);
 	}
 
 	/* Output level, weight and cost */

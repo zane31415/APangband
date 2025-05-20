@@ -236,10 +236,13 @@ static int32_t borg_power_equipment(void)
     /*** Reward various things ***/
 
     /* Hack -- Reward light radius */
-    if (borg.trait[BI_CURLITE] <= 3)
-        value += (borg.trait[BI_CURLITE] * 10000L);
-    if (borg.trait[BI_CURLITE] > 3)
-        value += (30000L) + (borg.trait[BI_CURLITE] * 1000);
+    /* necromancers like the dark */
+    if (borg.trait[BI_CLASS] == CLASS_NECROMANCER)
+        value -= ((borg.trait[BI_LIGHT] - 1) * 10000L);
+    else if (borg.trait[BI_LIGHT] <= 3)
+        value += (borg.trait[BI_LIGHT] * 10000L);
+    else if (borg.trait[BI_LIGHT] > 3)
+        value += (30000L) + (borg.trait[BI_LIGHT] * 1000);
 
     value += borg.trait[BI_MOD_MOVES] * (3000L);
     value += borg.trait[BI_DAM_RED] * (10000L);
@@ -730,7 +733,7 @@ static int32_t borg_power_equipment(void)
             activation_bonus += (500 + (96));
         else if (act_cold_ball100 == act)
             activation_bonus += (500 + (200));
-        else if (act_fire_bolt72 == act)
+        else if (act_fire_ball72 == act)
             activation_bonus += (500 + (72));
         else if (act_cold_bolt2 == act)
             activation_bonus += (500 + (12 * (8 + 1) / 2));
@@ -1562,9 +1565,11 @@ static int32_t borg_power_inventory(void)
         value += 4000L;
 
     /* Reward call lite */
-    k = 0;
-    for (; k < 1 && k < borg.trait[BI_ALITE]; k++)
-        value += 1000L;
+    if (borg.trait[BI_CLASS] != CLASS_NECROMANCER) {
+        k = 0;
+        for (; k < 1 && k < borg.trait[BI_ALITE]; k++)
+            value += 1000L;
+    }
 
     /* Genocide scrolls. Just scrolls, mainly used for Morgoth */
     if (borg.trait[BI_MAXDEPTH] >= 100) {
@@ -1844,7 +1849,7 @@ static int32_t borg_power_inventory(void)
 
         /* Some items will be used immediately and should not contribute to
          * encumbrance */
-        if (item && item->iqty
+        if (item && item->iqty && item->aware
             && ((item->tval == TV_SCROLL
                     && ((item->sval == sv_scroll_enchant_armor
                             && borg.trait[BI_AENCH_ARM] < 1000

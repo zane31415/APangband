@@ -114,10 +114,23 @@ jobs:
     name: Document Conversion
     runs-on: ubuntu-latest
     steps:
+      # Need commit history and tags for scripts/version.sh to work as expected
+      # so use 0 for fetch-depth.  Do this before installing the build
+      # dependencies as that step does some writing to the current directory
+      # and cloning the project wipes the current directory.
+      - name: Clone Project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       # Need both Sphinx (Python documentation tool) and a 3rd party theme.
       # Also install pip (to get theme), gcc, automake, autoconf, make
       # (those four are so configuration and "make manual" work), and git
-      # (so scripts/version.sh works).
+      # (so scripts/version.sh works).  With Python 3, use a virtual
+      # environment (requires at least Python 3.3) to install the 3rd party
+      # theme and a hacked version of sphinx-build which will use that
+      # environment for compatibility with "externally managed environments"
+      # like GitHub's runner for Ubuntu 24.04.
       - name: Install Build Dependencies
         id: build_dep
         run: |
@@ -126,22 +139,24 @@ jobs:
           use_python3=`python --version 2>&1 | awk "/^Python 3\\./ { print \"YES\" ; exit 0 ; } ; { print \"NO\" ; exit 0; }"`
           if test X$use_python3 == XYES ; then
             sudo apt-get install python3-pip
+            python3 -m venv .venv/doc-builder
+            .venv/doc-builder/bin/pip install -U sphinx
+            .venv/doc-builder/bin/pip install sphinx-better-theme
+            echo "#!${PWD}/.venv/doc-builder/bin/python" >./sphinx-build
+            tail -n +2 `which sphinx-build` >>./sphinx-build
+            chmod a+x ./sphinx-build
           else
             sudo apt-get install python-pip
+            pip install sphinx-better-theme
+            ln -s `which sphinx-build` ./sphinx-build
           fi
-          pip install sphinx-better-theme
 
-      # Need commit history and tags for scripts/version.sh to work as expected
-      # so use 0 for fetch-depth.
-      - name: Clone Project
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
+      # Use the version (perhaps just a symbolic link) of sphinx-build set up
+      # in the build dependencies step.
       - name: Convert
         run: |
           ./autogen.sh
-          ./configure --with-no-install --with-sphinx
+          ./configure SPHINXBUILD="${PWD}/sphinx-build" --with-no-install --with-sphinx
           make manual
 
       - name: Archive
@@ -470,77 +485,78 @@ jobs:
           path: ${{ steps.create_nintendo_3ds_archive.outputs.archive_file }}
           retention-days: 1
 
-  nds:
-    needs: [setup, docconvert]
-    name: Nintendo DS
-    runs-on: ubuntu-latest
-    container: devkitpro/devkitarm
-    steps:
-      - name: Download Artifact with Configuration Information
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.CONFIG_ARTIFACT }}
+#  nds:
+#    needs: [setup, docconvert]
+#    name: Nintendo DS
+#    runs-on: ubuntu-latest
+#    container: devkitpro/devkitarm
+#    steps:
+#      - name: Download Artifact with Configuration Information
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: ${{ env.CONFIG_ARTIFACT }}
 
-      - name: Extract Configuration Information and Store in Step Outputs
-        id: store_config
-        run: |
-          name=`sed -E -n -e 's/name= //p' $CONFIG_ARTIFACT_PATH`
-          echo "name=$name" >> $GITHUB_OUTPUT
-          prog=`sed -E -n -e 's/prog= //p' $CONFIG_ARTIFACT_PATH`
-          echo "prog=$prog" >> $GITHUB_OUTPUT
-          version=`sed -E -n -e 's/version= //p' $CONFIG_ARTIFACT_PATH`
-          echo "version=$version" >> $GITHUB_OUTPUT
+#      - name: Extract Configuration Information and Store in Step Outputs
+#        id: store_config
+#        run: |
+#          name=`sed -E -n -e 's/name= //p' $CONFIG_ARTIFACT_PATH`
+#          echo "name=$name" >> $GITHUB_OUTPUT
+#          prog=`sed -E -n -e 's/prog= //p' $CONFIG_ARTIFACT_PATH`
+#          echo "prog=$prog" >> $GITHUB_OUTPUT
+#          version=`sed -E -n -e 's/version= //p' $CONFIG_ARTIFACT_PATH`
+#          echo "version=$version" >> $GITHUB_OUTPUT
 
-      - name: Clone Project
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+#      - name: Clone Project
+#        uses: actions/checkout@v4
+#        with:
+#          fetch-depth: 0
 
-      - name: Download Artifact with Converted Documents
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.DOC_ARTIFACT }}
+#      - name: Download Artifact with Converted Documents
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: ${{ env.DOC_ARTIFACT }}
 
-      - name: Extract Converted Documents
-        run: |
-          tar -xf ${{ env.DOC_ARTIFACT_PATH }}
+#      - name: Extract Converted Documents
+#        run: |
+#          tar -xf ${{ env.DOC_ARTIFACT_PATH }}
 
-      - name: Create Nintendo DS Archive
-        id: create_nintendo_ds_archive
-        shell: bash
-        run: |
-          pushd src/
-          make -f Makefile.nds
-          popd
-          test -e src/${{ steps.store_config.outputs.prog }}.nds
+#      - name: Create Nintendo DS Archive
+#        id: create_nintendo_ds_archive
+#        shell: bash
+#        run: |
+#          pushd src/
+#          make -f Makefile.nds
+#          popd
+#          test -e src/${{ steps.store_config.outputs.prog }}.nds
 
-          archive_prefix=${{ steps.store_config.outputs.name }}-${{ steps.store_config.outputs.version }}
-          echo "archive_file=${archive_prefix}-nds.zip" >> $GITHUB_OUTPUT
-          mkdir -v ${{ steps.store_config.outputs.prog }}/
-          cp -v src/${{ steps.store_config.outputs.prog }}.nds ${archive_prefix}.nds
-          cp -rv lib ${{ steps.store_config.outputs.prog }}/
-          zip -r ${archive_prefix}-nds.zip ${archive_prefix}.nds ${{ steps.store_config.outputs.prog }}/
+#          archive_prefix=${{ steps.store_config.outputs.name }}-${{ steps.store_config.outputs.version }}
+#          echo "archive_file=${archive_prefix}-nds.zip" >> $GITHUB_OUTPUT
+#          mkdir -v ${{ steps.store_config.outputs.prog }}/
+#          cp -v src/${{ steps.store_config.outputs.prog }}.nds ${archive_prefix}.nds
+#          cp -rv lib ${{ steps.store_config.outputs.prog }}/
+#          zip -r ${archive_prefix}-nds.zip ${archive_prefix}.nds ${{ steps.store_config.outputs.prog }}/
 
-      - name: Create Artifact with Nintendo DS Archive Path
-        run: |
-          echo archive_path= '${{ steps.create_nintendo_ds_archive.outputs.archive_file }}' > $NIN_DS_ARTIFACT_PATH
+#      - name: Create Artifact with Nintendo DS Archive Path
+#        run: |
+#          echo archive_path= '${{ steps.create_nintendo_ds_archive.outputs.archive_file }}' > $NIN_DS_ARTIFACT_PATH
 
-      - name: Upload Artifact with Nintendo DS Archive Path
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.NIN_DS_ARTIFACT }}
-          path: ${{ env.NIN_DS_ARTIFACT_PATH }}
-          retention-days: 1
+#      - name: Upload Artifact with Nintendo DS Archive Path
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: ${{ env.NIN_DS_ARTIFACT }}
+#          path: ${{ env.NIN_DS_ARTIFACT_PATH }}
+#          retention-days: 1
 
-      - name: Upload Nintendo DS Archive as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.NIN_DS_ARCHIVE_ARTIFACT }}
-          path: ${{ steps.create_nintendo_ds_archive.outputs.archive_file }}
-          retention-days: 1
+#      - name: Upload Nintendo DS Archive as Artifact
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: ${{ env.NIN_DS_ARCHIVE_ARTIFACT }}
+#          path: ${{ steps.create_nintendo_ds_archive.outputs.archive_file }}
+#          retention-days: 1
 
   release:
-    needs: [ setup, source, windows, mac, _3ds, nds ]
+    needs: [ setup, source, windows, mac, _3ds ]
+#    needs: [ setup, source, windows, mac, _3ds, nds ]
     name: Create GitHub Release
     runs-on: ubuntu-latest
     steps:
@@ -623,21 +639,21 @@ jobs:
         with:
           name: ${{ env.NIN_3DS_ARCHIVE_ARTIFACT }}
 
-      - name: Download Artifact with Nintendo DS Archive Path
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.NIN_DS_ARTIFACT }}
+#      - name: Download Artifact with Nintendo DS Archive Path
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: ${{ env.NIN_DS_ARTIFACT }}
 
-      - name: Extract Nintendo DS Archive Path and Store in Step Outputs
-        id: store_ds
-        run: |
-          archive_path=`sed -E -n -e 's/archive_path= //p' $NIN_DS_ARTIFACT_PATH`
-          echo "archive_path=$archive_path" >> $GITHUB_OUTPUT
+#      - name: Extract Nintendo DS Archive Path and Store in Step Outputs
+#        id: store_ds
+#        run: |
+#          archive_path=`sed -E -n -e 's/archive_path= //p' $NIN_DS_ARTIFACT_PATH`
+#          echo "archive_path=$archive_path" >> $GITHUB_OUTPUT
 
-      - name: Download Artifact with Nintendo DS Archive
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.NIN_DS_ARCHIVE_ARTIFACT }}
+#      - name: Download Artifact with Nintendo DS Archive
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: ${{ env.NIN_DS_ARCHIVE_ARTIFACT }}
 
       - name: Populate Release
         uses: softprops/action-gh-release@v2
@@ -652,5 +668,5 @@ jobs:
             ${{ steps.store_win.outputs.archive_path }}
             ${{ steps.store_mac.outputs.archive_path }}
             ${{ steps.store_3ds.outputs.archive_path }}
-            ${{ steps.store_ds.outputs.archive_path }}
+#            ${{ steps.store_ds.outputs.archive_path }}
           token: ${{ secrets.GITHUB_TOKEN }}

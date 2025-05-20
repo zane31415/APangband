@@ -26,8 +26,8 @@
 #ifdef ALLOW_BORG
 
 extern int          borg_numb_live_unique;
-extern unsigned int borg_living_unique_index;
-extern int          borg_unique_depth;
+extern unsigned int borg_first_living_unique;
+extern int          borg_depth_hunted_unique;
 
 /*
  * Determine what level the borg is prepared to dive to.
@@ -38,6 +38,11 @@ extern const char *borg_prepared(int depth);
  * Determine if the Borg is out of "crucial" supplies.
  */
 extern const char *borg_restock(int depth);
+
+/*
+ * Determine if the Borg should return to town immediately.
+ */
+extern const char *borg_must_return_to_town(void);
 
 #endif
 #endif

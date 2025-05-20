@@ -829,7 +829,7 @@ bool borg_caution(void)
     /* if on level 100 and not ready for Morgoth, run */
     if (borg.trait[BI_CDEPTH] == 100 && borg_t - borg_began < 10
         && !borg_morgoth_position) {
-        if (borg.ready_morgoth == 0 && !borg.trait[BI_KING]) {
+        if (borg.ready_morgoth <= 0 && !borg.trait[BI_KING]) {
             /* teleport level up to 99 to finish uniques */
             if (borg_spell(TELEPORT_LEVEL)
                 || borg_read_scroll(sv_scroll_teleport_level)
@@ -845,6 +845,8 @@ bool borg_caution(void)
 
                 /* Start leaving */
                 borg.goal.leaving = true;
+                if (borg_flow_stair_less(GOAL_FLEE, false))
+                    return true;
             }
         }
     }
@@ -1058,8 +1060,8 @@ bool borg_caution(void)
     /* Don't take off in the middle of a fight */
     /* just to restock and it is useless to restock */
     /* if you have just left town. */
-    if (borg_restock(borg.trait[BI_CDEPTH]) && !borg_fighting_unique
-        && (borg_time_town + (borg_t - borg_began)) > 200) {
+    if (!borg_fighting_unique && (borg_time_town + (borg_t - borg_began)) > 200
+        && borg_restock(borg.trait[BI_CDEPTH])) {
         /* Start leaving */
         if (!borg.goal.leaving) {
             /* Note */
@@ -1071,7 +1073,8 @@ bool borg_caution(void)
         }
         /* Start fleeing */
         if (!borg.goal.fleeing && borg.trait[BI_ACCW] < 2
-            && borg.trait[BI_FOOD] > 3 && borg.trait[BI_AFUEL] > 2) {
+            && borg.trait[BI_FOOD] > 3 && borg.trait[BI_AFUEL] > 2
+            && (borg_t - borg_began) > 400) {
             /* Flee */
             borg_note(format(
                 "# Fleeing (restock) %s", borg_restock(borg.trait[BI_CDEPTH])));
@@ -1144,7 +1147,7 @@ bool borg_caution(void)
 
         /* don't go down if we can go up and are hungry */
         if (track_less.num
-            && (borg.trait[BI_CURLITE] == 0 || borg.trait[BI_ISHUNGRY]
+            && (borg.trait[BI_LIGHT] == 0 || borg.trait[BI_ISHUNGRY]
                 || borg.trait[BI_ISWEAK] || borg.trait[BI_FOOD] < 2))
             borg.stair_more = false;
 
@@ -1205,8 +1208,7 @@ bool borg_caution(void)
     /*** Deal with critical situations ***/
 
     /* Hack -- require light */
-    if (!borg.trait[BI_CURLITE]
-        && !borg.trait[BI_LIGHT]) /* No Lite, AND Not Glowing */
+    if (!borg.trait[BI_LIGHT]) /* No Lite, AND Not Glowing */
     {
         enum borg_need need = borg_maintain_light();
         if (need == BORG_MET_NEED)

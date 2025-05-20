@@ -52,6 +52,7 @@ When the game starts up, after you have loaded or created a character, some user
 
 After these are complete, the game will try to load (in order):
 
+* window.prf - loaded for all characters
 * *race*.prf - where *race* is your character's race, so something like ``Dwarf.prf``
 * *class*.prf - where *class* is your character's class, so something like ``Paladin.prf``
 * *name*.prf - where *name* is your character's name, so something like ``Balin.prf``
@@ -462,8 +463,11 @@ application and then choosing from one of the entries in the Graphics option.
 Choosing "Classic ASCII" will display the map as text.  Any of the other options
 will use some form of graphical tiles to display the map.  If you wish to
 adjust how graphical tiles are scaled to match up with the currently selected
-font in the main window, select 'Change Tile Set Scaling...' in the Settings
-menu.
+font in the main window, use the 'Tile Size' menu in the Settings menu.  The
+100% entry in the 'Tile Size' menu will cause a tile to be displayed as
+close as possible to its native resolution.  The 200% entry will cause a
+tile to be displayed as close as possible to twice the tile's native width and
+height.
 
 When you leave the game, the current Mac-specific settings are saved and will
 be automatically reloaded when you restart.  The settings are stored in

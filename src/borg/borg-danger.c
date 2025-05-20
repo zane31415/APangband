@@ -112,9 +112,10 @@ static int borg_danger_physical(int i, bool full_damage)
             if ((d_side < 3) && (z > d_dice * d_side)) {
                 n += 200;
             }
-            /* fudge- only mystics kick and they tend to KO.  Avoid close */
-            /* combat like the plague */
-            if (method->stun) {
+            /* fudge- some baddies kick and they tend to KO.  Avoid close */
+            /* combat like the plague.  10d2 is common but take any very low */
+            /* sides and high dice count as dangerous */
+            if (d_side < 3 && d_dice > 5) {
                 n += 400;
             }
             power = 60;
@@ -201,7 +202,8 @@ static int borg_danger_physical(int i, bool full_damage)
         case MONBLOW_EAT_LIGHT:
             z     = (d_dice * d_side);
             power = 5;
-            if (borg.trait[BI_CURLITE] == 0)
+            if (!borg_items[INVEN_LIGHT].timeout
+                || of_has(borg_items[INVEN_LIGHT].flags, OF_NO_FUEL))
                 break;
             if (borg.trait[BI_AFUEL] > 5)
                 break;
@@ -2317,7 +2319,7 @@ int borg_danger_one_kill(
      * checks in borg6.c in the defense maneuvers.
      */
     if (borg_tp_other_n) {
-        for (ii = 1; ii <= borg_tp_other_n; ii++) {
+        for (ii = 0; ii <= borg_tp_other_n; ii++) {
             /* Is the current danger check same as a saved monster index? */
             if (i == borg_tp_other_index[ii]) {
                 return 0;
