@@ -179,6 +179,24 @@ static void ap_begin(const char *server, const char *slotname)
 	my_strcpy(ap_slot, slotname ? slotname : "", sizeof(ap_slot));
 	ap_password[0] = '\0';
 
+	/*
+	 * AP_Init() allocates the internal callback registries (the slot-data
+	 * string list and hash tables), so it MUST run before any registration --
+	 * AP_RegisterSlotDataIntCallback() in particular dereferences those and
+	 * would segfault otherwise.
+	 */
+	AP_Init(ap_host, port, AP_GAME_NAME, ap_slot, ap_password);
+
+	/*
+	 * Report the Archipelago network protocol version we target.  APCc leaves
+	 * client_version NULL until set, and dereferences it when building the
+	 * Connect packet, so this must happen before connecting.
+	 */
+	{
+		struct AP_NetworkVersion ver = { 0, 6, 4 };
+		AP_SetClientVersion(&ver);
+	}
+
 	AP_SetItemClearCallback(ap_cb_item_clear);
 	AP_SetItemRecvCallback(ap_cb_item_recv);
 	AP_SetLocationCheckedCallback(ap_cb_location_checked);
@@ -194,7 +212,6 @@ static void ap_begin(const char *server, const char *slotname)
 	AP_RegisterSlotDataIntCallback("artifacts_as_checks",
 		(void (*)(uint64_t))ap_cb_slotdata_artifacts);
 
-	AP_Init(ap_host, port, AP_GAME_NAME, ap_slot, ap_password);
 	AP_Start();
 
 	ap_started = true;
