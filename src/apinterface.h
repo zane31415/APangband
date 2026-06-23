@@ -78,6 +78,12 @@ bool ap_artifacts_as_checks(void);
 void ap_send_deathlink(void);
 
 /**
+ * Report goal completion to the server (ClientStatus GOAL).  Call when the
+ * player wins (kills Morgoth).  No-op if not connected.
+ */
+void ap_send_victory(void);
+
+/**
  * Register the handler called when a DeathLink is received from another player.
  * The handler should kill the local player.
  */

@@ -16,6 +16,7 @@
  *    are included in all such copies.  Other copyrights may also apply.
  */
 #include "angband.h"
+#include "ap-game.h"
 #include "datafile.h"
 #include "init.h"
 #include "mon-util.h"
@@ -249,6 +250,9 @@ bool quest_check(struct player *p, const struct monster *m)
 			msg("*** CONGRATULATIONS ***");
 			msg("You have won the game!");
 			msg("You may retire (key is shift-q) when you are ready.");
+
+			/* Archipelago: completing the final quest fulfils the goal. */
+			ap_game_player_won();
 		}
 
 		return true;

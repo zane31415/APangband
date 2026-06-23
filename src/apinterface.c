@@ -71,7 +71,7 @@ struct ap_in_event {
 	guint64 index;
 };
 
-enum ap_out_type { AP_OUT_CHECK, AP_OUT_DEATHLINK };
+enum ap_out_type { AP_OUT_CHECK, AP_OUT_DEATHLINK, AP_OUT_VICTORY };
 struct ap_out_event {
 	enum ap_out_type type;
 	char *name;       /* heap copy, freed by the service thread */
@@ -156,6 +156,8 @@ static void ap_drain_out(void)
 			if (id >= 0) AP_SendItem((uint64_t)id);
 		} else if (o->type == AP_OUT_DEATHLINK) {
 			AP_DeathLinkSend();
+		} else if (o->type == AP_OUT_VICTORY) {
+			AP_StoryComplete();
 		}
 		g_free(o->name);
 		g_free(o);
@@ -351,6 +353,19 @@ void ap_send_deathlink(void)
 
 	o = g_new0(struct ap_out_event, 1);
 	o->type = AP_OUT_DEATHLINK;
+	o->name = NULL;
+	g_async_queue_push(ap_out_q, o);
+	AP_WakeService();
+}
+
+void ap_send_victory(void)
+{
+	struct ap_out_event *o;
+
+	if (!ap_started) return;
+
+	o = g_new0(struct ap_out_event, 1);
+	o->type = AP_OUT_VICTORY;
 	o->name = NULL;
 	g_async_queue_push(ap_out_q, o);
 	AP_WakeService();

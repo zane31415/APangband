@@ -28,4 +28,7 @@ void ap_game_item_picked_up(const struct object *obj);
  */
 void ap_game_player_died(void);
 
+/** Report that the player has won (killed Morgoth): completes the AP goal. */
+void ap_game_player_won(void);
+
 #endif /* AP_GAME_H */

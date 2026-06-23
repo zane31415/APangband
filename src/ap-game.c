@@ -124,6 +124,11 @@ void ap_game_player_died(void)
 	ap_send_deathlink();
 }
 
+void ap_game_player_won(void)
+{
+	ap_send_victory();
+}
+
 /**
  * Authentication finished.  The checked-location replay has already run (marking
  * known-dead uniques), so reconcile the other direction: send checks for any
