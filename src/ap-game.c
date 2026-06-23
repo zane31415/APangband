@@ -10,7 +10,15 @@
 #include "monster.h"
 #include "mon-util.h"
 #include "object.h"
+#include "obj-gear.h"
+#include "obj-knowledge.h"
+#include "obj-make.h"
+#include "obj-pile.h"
+#include "obj-tval.h"
+#include "obj-util.h"
 #include "player.h"
+#include "player-calcs.h"
+#include "player-spell.h"
 #include "player-util.h"
 #include "store.h"
 #include "apinterface.h"
@@ -41,49 +49,400 @@ static void ap_check_confirmed(const char *name)
 	race->max_num = 0;
 }
 
-/**
- * An item was granted to our slot.  Fires for live grants and for the replay of
- * all previously-received items on connect, so it is the hook for stocking the
- * player's home with Archipelago loot.
- *
- * TODO: create the corresponding object(s) and place them in the home store.
- * This needs: name -> object mapping (artifacts via lookup_artifact_name();
- * consumables like "Rod of Recall"/"Scroll of Acquirement" via kind lookup;
- * "Progressive ... Artifact" via per-category ordering), plus de-duplication so
- * reconnecting the same character doesn't re-stock items already in the home
- * (track a high-water mark of granted items in the save file).
+/*** Archipelago item delivery: name -> game effect ***/
+
+/*
+ * The 23 item names below are frozen: they are the data-package contents the
+ * apworld generates (see angband/data.py).  They split into:
+ *   - 13 "Progressive <Category> Artifact": the Nth grant of a category yields
+ *     the Nth artifact of that category ordered by artifact.txt 'level';
+ *   - 2 specific named artifacts (the diggers Pick of Erebor / Mattock of Náin);
+ *   - 5 consumables placed in the home;
+ *   - 3 non-object boons (gold, experience, expanded shop books).
  */
-/**
- * Turn an Archipelago item name into a game object to place in the home.
- *
- * TODO: the actual name->object mapping.  Cases to handle:
- *   - specific artifacts (e.g. "Pick of Erebor") via lookup_artifact_name();
- *   - consumables ("Rod of Recall", "Scroll of Acquirement", potions...) via
- *     object kind, with any leading quantity in the name;
- *   - "Progressive <Category> Artifact": the Nth artifact of that category,
- *     categories ordered by artifact.txt 'level' (depth);
- *   - non-object boons ("+5 levels of Experience", "Triple Starting Gold",
- *     "Expanded Starting Shop Books") need separate, non-home handling.
- * Returns NULL until implemented, so nothing is placed yet.
+
+/** Progressive artifact categories, in the order their items are numbered. */
+enum ap_prog_cat {
+	AP_CAT_LIGHT, AP_CAT_BLADED, AP_CAT_BLUNT, AP_CAT_POLEARM, AP_CAT_RANGED,
+	AP_CAT_BOOTS, AP_CAT_HELM, AP_CAT_ARMOR, AP_CAT_CLOAK, AP_CAT_GLOVES,
+	AP_CAT_SHIELD, AP_CAT_RING, AP_CAT_AMULET, AP_CAT_MAX
+};
+
+/** Maps each progressive item name to the object tvals that make up the category. */
+static const struct {
+	const char *item_name;
+	int tvals[3];	/* TV_NULL (0) terminated */
+} ap_prog_cats[AP_CAT_MAX] = {
+	{ "Progressive Light Artifact",         { TV_LIGHT } },
+	{ "Progressive Bladed Weapon Artifact", { TV_SWORD } },
+	{ "Progressive Blunt Weapon Artifact",  { TV_HAFTED } },
+	{ "Progressive Polearm Weapon Artifact",{ TV_POLEARM } },
+	{ "Progressive Ranged Weapon Artifact", { TV_BOW } },
+	{ "Progressive Boots Artifact",         { TV_BOOTS } },
+	{ "Progressive Helm Artifact",          { TV_HELM, TV_CROWN } },
+	{ "Progressive Armor Artifact",         { TV_SOFT_ARMOR, TV_HARD_ARMOR, TV_DRAG_ARMOR } },
+	{ "Progressive Cloak Artifact",         { TV_CLOAK } },
+	{ "Progressive Gloves Artifact",        { TV_GLOVES } },
+	{ "Progressive Shield Artifact",        { TV_SHIELD } },
+	{ "Progressive Ring Artifact",          { TV_RING } },
+	{ "Progressive Amulet Artifact",        { TV_AMULET } },
+};
+
+/** Consumable items, with the object kind and stack size to place in the home. */
+static const struct {
+	const char *name;
+	int tval;
+	const char *sval;	/* kind name, as looked up by lookup_sval() */
+	int qty;
+} ap_consumables[] = {
+	{ "2 Potions of Augmentation", TV_POTION, "Augmentation",              2 },
+	{ "Rod of Recall",             TV_ROD,    "Recall",                    1 },
+	{ "Scroll of Acquirement",     TV_SCROLL, "Acquirement",               1 },
+	{ "Scroll of Deep Descent",    TV_SCROLL, "Deep Descent",              1 },
+	{ "Piece of Elvish Waybread",  TV_FOOD,   "Piece of Elvish Waybread",  1 },
+};
+
+/*
+ * Transient, game-thread-only count of how many of each progressive category
+ * we have seen so far in the current item stream.  Reset at the start of every
+ * replay (index 0) so the Nth-artifact mapping is recomputed deterministically
+ * from the top, even across the per-character de-duplication.
  */
-static struct object *ap_make_item(const char *name)
+static int ap_prog_count[AP_CAT_MAX];
+
+/*
+ * Transient count of "Expanded Starting Shop Books" grants seen this stream:
+ * the Kth grant stocks the bookseller's Kth dungeon book (in sval order).  Like
+ * the progressive counters this is reset at index 0 and re-counted every replay.
+ */
+static int ap_books_count;
+
+/*
+ * Set when a home/inventory item this stream couldn't be placed (everything
+ * full): the contiguous high-water mark stops there and the remaining items are
+ * left for a later replay, so nothing is silently dropped or delivered twice.
+ */
+static bool ap_blocked;
+
+/** Return the progressive category for an item name, or -1 if it isn't one. */
+static int ap_prog_cat_of(const char *name)
 {
-	(void)name;
+	int c;
+
+	for (c = 0; c < AP_CAT_MAX; c++)
+		if (streq(name, ap_prog_cats[c].item_name)) return c;
+	return -1;
+}
+
+/** qsort comparator: order artifacts by depth 'level', then index for stability. */
+static int ap_art_cmp(const void *a, const void *b)
+{
+	const struct artifact *x = *(const struct artifact * const *)a;
+	const struct artifact *y = *(const struct artifact * const *)b;
+
+	if (x->level != y->level) return x->level - y->level;
+	return (int)x->aidx - (int)y->aidx;
+}
+
+/** The \p n-th (1-based) artifact of progressive category \p cat, or NULL. */
+static const struct artifact *ap_nth_cat_artifact(int cat, int n)
+{
+	const struct artifact **list;
+	const struct artifact *result = NULL;
+	int count = 0, i, t;
+
+	if (cat < 0 || cat >= AP_CAT_MAX || n < 1) return NULL;
+
+	list = mem_zalloc(z_info->a_max * sizeof(*list));
+	for (i = 0; i < z_info->a_max; i++) {
+		const struct artifact *art = &a_info[i];
+
+		if (!art->name) continue;
+		for (t = 0; t < 3 && ap_prog_cats[cat].tvals[t]; t++) {
+			if (art->tval == ap_prog_cats[cat].tvals[t]) {
+				list[count++] = art;
+				break;
+			}
+		}
+	}
+
+	sort(list, count, sizeof(*list), ap_art_cmp);
+	if (n <= count) result = list[n - 1];
+	mem_free(list);
+	return result;
+}
+
+/** Set up an object's "known" twin the way stores do, ready to be carried. */
+static void ap_object_know(struct object *obj)
+{
+	obj->known = object_new();
+	obj->known->notice |= OBJ_NOTICE_ASSESSED;
+	object_set_base_known(player, obj);
+	obj->known->notice |= OBJ_NOTICE_ASSESSED;
+	player_know_object(player, obj);
+	obj->origin = ORIGIN_NONE;
+}
+
+/** Build a known object of \p kind in a stack of \p qty. */
+static struct object *ap_make_kind_object(struct object_kind *kind, int qty)
+{
+	struct object *obj;
+
+	if (!kind) return NULL;
+
+	obj = object_new();
+	object_prep(obj, kind, 0, RANDOMISE);
+	obj->number = MAX(1, qty);
+	ap_object_know(obj);
+	return obj;
+}
+
+/** Build a fully-realised artifact object (the real reward, not the check). */
+static struct object *ap_make_artifact_object(const struct artifact *art)
+{
+	struct object_kind *kind;
+	struct object *obj;
+
+	if (!art) return NULL;
+	kind = lookup_kind(art->tval, art->sval);
+	if (!kind) return NULL;
+
+	obj = object_new();
+	object_prep(obj, kind, art->alloc_min, MAXIMISE);
+	obj->artifact = art;
+	copy_artifact_data(obj, art);
+	/*
+	 * Deliberately NOT mark_artifact_created(): in artifacts-as-checks mode
+	 * the attributeless natural copy must still be allowed to spawn so it can
+	 * be picked up as the location check.  This granted copy is the separate,
+	 * real reward.
+	 */
+	ap_object_know(obj);
+	return obj;
+}
+
+/**
+ * Turn an Archipelago item name into a game object to place in the home, or
+ * NULL if the name isn't a home-delivered item (a boon, or unmapped).  \p prog_n
+ * is the 1-based progressive index for "Progressive <Category> Artifact" names.
+ */
+static struct object *ap_make_item(const char *name, int prog_n)
+{
+	const struct artifact *art;
+	int cat = ap_prog_cat_of(name);
+	size_t i;
+
+	/* Progressive artifact: the Nth of its category by depth. */
+	if (cat >= 0)
+		return ap_make_artifact_object(ap_nth_cat_artifact(cat, prog_n));
+
+	/* Consumables and the filler. */
+	for (i = 0; i < N_ELEMENTS(ap_consumables); i++) {
+		if (streq(name, ap_consumables[i].name)) {
+			int tval = ap_consumables[i].tval;
+			int sval = lookup_sval(tval, ap_consumables[i].sval);
+			struct object_kind *kind = (sval >= 0) ?
+				lookup_kind(tval, sval) : NULL;
+			return ap_make_kind_object(kind, ap_consumables[i].qty);
+		}
+	}
+
+	/* Any name that is exactly an artifact (the specific diggers). */
+	art = lookup_artifact_name(name);
+	if (art && art->name && streq(art->name, name))
+		return ap_make_artifact_object(art);
+
 	return NULL;
 }
 
-/** Deliver a single granted item into the player's home. */
-static void ap_deliver_item(const char *name)
+/**
+ * Place a granted object: into the pack if the player is down in the dungeon
+ * and there is room, otherwise into the home.  Returns false only if it could
+ * go nowhere (the home was full too), leaving the caller to retry it later.
+ */
+static bool ap_place_object(struct object *obj, const char *name)
 {
-	struct object *obj = ap_make_item(name);
+	struct store *home = &stores[f_info[FEAT_HOME].shopnum - 1];
 
-	if (!obj) {
-		msg("AP: '%s' has no home delivery mapping yet.", name);
-		return;
+	if (player->depth > 0 && inven_carry_okay(obj)) {
+		inven_carry(player, obj, true, false);
+		msg("AP: '%s' arrives in your pack.", name);
+		return true;
 	}
 
-	home_carry(obj);
-	msg("AP: '%s' delivered to your home.", name);
+	if (store_check_num(home, obj)) {
+		home_carry(obj);
+		msg("AP: '%s' delivered to your home.", name);
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * Deliver a single granted home/inventory item.  Returns false if the item is
+ * real but couldn't be placed anywhere (so the caller should not advance past
+ * it); true otherwise (placed, or nothing to place).
+ */
+static bool ap_deliver_item(const char *name, int prog_n)
+{
+	struct object *obj = ap_make_item(name, prog_n);
+
+	if (!obj) {
+		msg("AP: '%s' has no delivery mapping.", name);
+		return true;
+	}
+
+	if (ap_place_object(obj, name))
+		return true;
+
+	/* No room anywhere: drop this copy; the replay remakes it next connect. */
+	if (obj->known) object_delete(NULL, NULL, &obj->known);
+	obj->known = NULL;
+	object_delete(NULL, NULL, &obj);
+	return false;
+}
+
+/**
+ * Triple-gold boon: multiply the current purse by three.  Multiplicative and
+ * stacking, so successive grants give 3x, 9x, 27x, ... -- applied once per
+ * character (gated by the high-water mark), so a fresh or respawned character
+ * gets the full multiplier while a reconnecting one is not multiplied again.
+ */
+static void ap_boon_triple_gold(void)
+{
+	int32_t cap = (int32_t)((1UL << 31) - 1);
+	int64_t total = (int64_t)player->au * 3;
+
+	player->au = (total > cap) ? cap : (int32_t)total;
+	player->upkeep->redraw |= PR_GOLD;
+	msg("AP: Your gold is tripled!");
+}
+
+/** Experience boon: jump the character up \p levels from wherever it is now. */
+static void ap_boon_extra_levels(int levels)
+{
+	int old_lev = player->lev;
+	int target = old_lev + levels;
+	int32_t need;
+
+	if (target > PY_MAX_LEVEL) target = PY_MAX_LEVEL;
+	if (target < 2 || target <= old_lev) return;
+
+	/* Experience needed to sit at the start of the target level. */
+	need = (int32_t)(player_exp[target - 2] * player->expfact / 100L);
+	if (need > player->exp)
+		player_exp_gain(player, need - player->exp);
+
+	msg("AP: +%d level(s) of experience (now level %d).",
+		player->lev - old_lev, player->lev);
+}
+
+/** The \p n-th (1-based) dungeon spellbook of a book \p tval, in sval order. */
+static struct object_kind *ap_nth_dungeon_book(int tval, int n)
+{
+	struct object_base *base = &kb_info[tval];
+	int sval, rank = 0;
+
+	for (sval = 1; sval <= base->num_svals; sval++) {
+		struct object_kind *kind = lookup_kind(tval, sval);
+		const struct class_book *book;
+
+		if (!kind) continue;
+		book = object_kind_to_book(kind);
+		if (!book || !book->dungeon) continue;
+		if (++rank == n) return kind;
+	}
+
+	return NULL;
+}
+
+/**
+ * Append \p kind to a store's always-stock list (idempotent) and put one in the
+ * stock right now, so it shows up without waiting for the next day's turnover.
+ * Returns true if the kind was newly added.
+ */
+static bool ap_store_always_add(struct store *s, struct object_kind *kind)
+{
+	struct object *obj;
+	size_t i;
+
+	if (!s || !kind) return false;
+
+	for (i = 0; i < s->always_num; i++)
+		if (s->always_table[i] == kind) return false;	/* already stocked */
+
+	if (!s->always_num) {
+		s->always_size = 8;
+		s->always_table = mem_zalloc(s->always_size * sizeof(*s->always_table));
+	} else if (s->always_num >= s->always_size) {
+		s->always_size += 8;
+		s->always_table = mem_realloc(s->always_table,
+			s->always_size * sizeof(*s->always_table));
+	}
+	s->always_table[s->always_num++] = kind;
+
+	obj = ap_make_kind_object(kind, 1);
+	if (obj && !store_carry(s, obj)) {
+		object_delete(NULL, NULL, &obj->known);
+		obj->known = NULL;
+		object_delete(NULL, NULL, &obj);
+	}
+	return true;
+}
+
+/**
+ * Expanded-shop-books boon: each grant adds one more tier of dungeon books to
+ * the town bookseller -- the \p n-th dungeon book (sval order) of every realm.
+ * The bookseller's stock is rebuilt from store.txt every launch, so this is
+ * re-applied (idempotently) for every received copy on every connect/replay.
+ */
+static void ap_boon_expanded_books(int n)
+{
+	static const int book_tvals[] = {
+		TV_MAGIC_BOOK, TV_PRAYER_BOOK, TV_NATURE_BOOK, TV_SHADOW_BOOK
+	};
+	struct store *book = &stores[f_info[FEAT_STORE_BOOK].shopnum - 1];
+	bool any = false;
+	size_t k;
+
+	for (k = 0; k < N_ELEMENTS(book_tvals); k++) {
+		struct object_kind *kind = ap_nth_dungeon_book(book_tvals[k], n);
+		if (kind && ap_store_always_add(book, kind)) any = true;
+	}
+
+	if (any) msg("AP: The bookseller stocks deeper spellbooks (tier %d).", n);
+}
+
+/**
+ * Boons that touch state rebuilt from scratch every launch (the town
+ * bookseller).  Must be re-applied on every replay, not just first receipt;
+ * each is idempotent.  Returns true if \p name was such a boon.
+ */
+static bool ap_apply_replay_boon(const char *name)
+{
+	if (streq(name, "Expanded Starting Shop Books")) {
+		ap_boon_expanded_books(++ap_books_count);
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Boons that mutate saved player state (gold, experience) and so must be
+ * applied exactly once per character.  Returns true if \p name was such a boon.
+ */
+static bool ap_apply_oneshot_boon(const char *name)
+{
+	if (streq(name, "Triple Starting Gold")) {
+		ap_boon_triple_gold();
+		return true;
+	}
+	if (streq(name, "+5 levels of Experience")) {
+		ap_boon_extra_levels(5);
+		return true;
+	}
+	return false;
 }
 
 /**
@@ -93,18 +452,51 @@ static void ap_deliver_item(const char *name)
  * fresh character starts at 0 and receives the full replay (restocking its empty
  * home), while the same character reconnecting has its mark past the replay and
  * adds nothing.  This is why we can't use APCc's server-side notify flag.
+ *
+ * Counting runs for *every* occurrence regardless of the high-water mark: the
+ * progressive-category counters (so the Nth-artifact mapping stays correct
+ * across skipped items), the expanded-books tier counter, and re-applying boons
+ * over launch-rebuilt state (the bookseller).  State that is saved -- home and
+ * pack contents, gold, experience -- is applied once, gated by the mark.
+ *
+ * If a home/inventory item can't be placed (everything full), the mark is left
+ * at that item and the rest of the stream is held back (ap_blocked) so the mark
+ * stays contiguous; a later replay (after space frees up) retries from there.
  */
 static void ap_item_granted(const char *item_name, uint64_t index)
 {
+	int prog_n = 0, cat;
+
 	if (!player) return;
 
-	/* Already delivered to this character. */
+	/* A fresh replay restarts at index 0: recompute all transient counters. */
+	if (index == 0) {
+		memset(ap_prog_count, 0, sizeof(ap_prog_count));
+		ap_books_count = 0;
+		ap_blocked = false;
+	}
+
+	/* Advance the category counter even for items we won't re-deliver. */
+	cat = ap_prog_cat_of(item_name);
+	if (cat >= 0) prog_n = ++ap_prog_count[cat];
+
+	/* Re-applied every replay (idempotent). */
+	ap_apply_replay_boon(item_name);
+
+	/* Once-per-character below: skip anything at/under the high-water mark. */
 	if (index < player->ap_items_received) return;
 
-	ap_deliver_item(item_name);
+	/* A prior item this stream is waiting for space: hold the mark contiguous. */
+	if (ap_blocked) return;
 
-	/* Advance the contiguous high-water mark past this item. */
-	player->ap_items_received = (uint32_t)(index + 1);
+	if (ap_apply_oneshot_boon(item_name)) {
+		player->ap_items_received = (uint32_t)(index + 1);
+	} else if (ap_deliver_item(item_name, prog_n)) {
+		player->ap_items_received = (uint32_t)(index + 1);
+	} else {
+		/* No room anywhere: stop here and retry this item on a later connect. */
+		ap_blocked = true;
+	}
 }
 
 /** A DeathLink arrived: kill the player (without bouncing it back out). */

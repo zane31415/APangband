@@ -152,7 +152,8 @@ carry-cap:floor-size:23
 #---------------------------------------------------------------------
 
 # Maximum number of discrete objects in store inventory
-store:inven-max:24
+# (Archipelago: raised from 24 so the home can hold all granted items.)
+store:inven-max:256
 
 # Number of turns between turnovers
 store:turns:1000
