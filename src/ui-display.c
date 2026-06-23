@@ -18,6 +18,7 @@
  */
 
 #include "angband.h"
+#include "apinterface.h"
 #include "buildid.h"
 #include "cave.h"
 #include "cmd-core.h"
@@ -1289,13 +1290,26 @@ static size_t prt_unignore(int row, int col)
 }
 
 /**
+ * Print Archipelago connection status.
+ */
+static size_t prt_ap(int row, int col)
+{
+	if (ap_is_connected()) {
+		c_put_str(COLOUR_L_GREEN, "AP ", row, col);
+		return 3;
+	}
+
+	return 0;
+}
+
+/**
  * Descriptive typedef for status handlers
  */
 typedef size_t status_f(int row, int col);
 
 static status_f *status_handlers[] =
 { prt_level_feeling, prt_light, prt_moves, prt_unignore, prt_recall,
-  prt_descent, prt_state, prt_study, prt_tmd, prt_dtrap, prt_terrain };
+  prt_descent, prt_state, prt_study, prt_tmd, prt_dtrap, prt_terrain, prt_ap };
 
 
 static void update_statusline_aux(int row, int col)

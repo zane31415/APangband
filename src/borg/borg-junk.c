@@ -60,7 +60,24 @@ bool borg_destroy_floor(void)
     else
         borg_note("# Destroying floor item.");
 
-    /* ignore it now */
+    /*
+     * Ignore it now.  WARNING: this is a fixed key sequence for a menu whose
+     * real key count is state-dependent, and is a known source of key-queue
+     * desync:
+     *   'k' -> ignore command, opens get_item (USE_INVEN|EQUIP|QUIVER|FLOOR)
+     *   '-' -> toggle the item selector to the FLOOR list.  This assumes the
+     *          selector started on inventory/equipment.  If the pack is empty
+     *          (e.g. borg_drop_junk() just dropped everything) the selector may
+     *          already be on the floor, so '-' instead rings the bell or lands
+     *          on the wrong list -- throwing the key count off by one.
+     *   'a'  -> select the first floor item.
+     *   'a'  -> select the first entry ("This item only") of textui_cmd_ignore_
+     *           menu(), which is itself a dynamic, variable-length menu.
+     * When the real interaction consumes a different number of keys, the
+     * leftover queued keys execute as top-level commands and can raise an
+     * unexpected "Direction?" prompt (see borg_react_prompted()).  That path
+     * now escapes + flushes with a bounded retry instead of halting the borg.
+     */
     borg_keypress('k');
     borg_keypress('-');
     borg_keypress('a');

@@ -34,6 +34,24 @@
 bool borg_dont_react = false;
 
 /*
+ * Bounded recovery for the "unexpected request for direction" desync.
+ *
+ * The borg sometimes queues a fixed-length key sequence for a menu whose
+ * real key count is state-dependent (e.g. borg_destroy_floor()'s "k - a a"
+ * ignore sequence, where the starting item list and the dynamic ignore menu
+ * change how many keys are actually consumed).  Leftover keys then execute as
+ * top-level commands; one of them (e.g. 'c' close) raises a "Direction?"
+ * prompt the borg never queued a target for.  Upstream simply borg_oops()es
+ * here, halting the borg so a human can debug -- which wedges an unattended
+ * run forever.  Instead we ESCAPE the prompt and flush the stray keys so the
+ * borg re-plans, but cap how many times this happens without progress so a
+ * genuinely deterministic desync still halts rather than spinning forever.
+ */
+#define BORG_MAX_UNEXPECTED_DIRECTION 5
+static int     borg_unexpected_direction_count  = 0;
+static int16_t borg_unexpected_direction_last_t = 0;
+
+/*
  * Handle various "important" messages
  *
  * Actually, we simply "queue" them for later analysis
@@ -107,7 +125,7 @@ bool borg_react_prompted(const char* buf, struct keypress *key, int x, int y)
         borg_flush();
 
         /* Take note */
-        borg_note("# Cheating death...");
+        borg_note("# Death -- reincarnating to try again...");
 
         /* Dump the Character Map*/
         if (borg.trait[BI_CLEVEL] >= borg_cfg[BORG_DUMP_LEVEL]
@@ -123,12 +141,16 @@ bool borg_react_prompted(const char* buf, struct keypress *key, int x, int y)
         borg_enter_score();
 #endif
 
-        if (!borg_cfg[BORG_CHEAT_DEATH]) {
-            reincarnate_borg();
-            borg_respawning = 7;
-        }
-        else
-            do_cmd_wiz_cure_all(0);
+        /*
+         * Roll up a fresh character and try again rather than god-mode healing
+         * the dead one: the old character's progress is genuinely lost, which is
+         * what we want for Archipelago test runs (reincarnate_borg() also
+         * reconnects the slot so the new life gets its item replay).  Note this
+         * still uses the engine's cheat_live intercept, so it fires before
+         * is_dead is set -- no DeathLink is broadcast for a reincarnated death.
+         */
+        reincarnate_borg();
+        borg_respawning = 7;
 
         key->code = 'n';
         return true;
@@ -175,6 +197,34 @@ bool borg_react_prompted(const char* buf, struct keypress *key, int x, int y)
             borg_note("** UNEXPECTED REQUEST FOR DIRECTION Dumping keypress history ***");
             borg_note(format("** line starting <%s> ***", buf));
             borg_dump_recent_keys(20);
+
+            /*
+             * If the borg has made progress since the last occurrence,
+             * treat this as a fresh incident rather than accumulating
+             * toward the halt threshold.  borg_t advances roughly once per
+             * think cycle, so a real desync loop (which makes no progress)
+             * keeps firing with borg_t barely moved, while genuinely
+             * unrelated incidents spread out in time reset the counter.
+             */
+            if (borg_t - borg_unexpected_direction_last_t > 50)
+                borg_unexpected_direction_count = 0;
+            borg_unexpected_direction_last_t = borg_t;
+
+            if (++borg_unexpected_direction_count
+                <= BORG_MAX_UNEXPECTED_DIRECTION) {
+                borg_note(format("# Recovering from unexpected direction prompt "
+                                 "(attempt %d/%d): escaping and flushing keys.",
+                    borg_unexpected_direction_count,
+                    BORG_MAX_UNEXPECTED_DIRECTION));
+                /* Drop every stray queued key so the borg re-plans cleanly */
+                borg_flush();
+                /* Dismiss the unexpected prompt */
+                key->code = ESCAPE;
+                return true;
+            }
+
+            /* Repeated desync with no progress -- halt for debugging */
+            borg_unexpected_direction_count = 0;
             borg_oops("unexpected request for direction");
             /* Hack -- Escape */
             key->code = ESCAPE;

@@ -1,0 +1,39 @@
+# BORG.txt default settings 
+# A more descriptive version of this file is delivered. 
+# Check your original install for borg.txt and 
+# replace this one with the delivered version. 
+
+borg_verbose = FALSE
+borg_munchkin_start = FALSE
+borg_munchkin_level = 12
+borg_munchkin_depth = 16
+borg_worships_damage = FALSE
+borg_worships_speed = FALSE
+borg_worships_hp = FALSE
+borg_worships_mana = FALSE
+borg_worships_ac = FALSE
+borg_worships_gold = FALSE
+borg_plays_risky = FALSE
+borg_kills_uniques = FALSE
+borg_uses_swaps = TRUE
+borg_uses_dynamic_calcs = FALSE
+borg_stop_dlevel = 128
+borg_stop_clevel = 51
+borg_no_deeper = 127
+borg_stop_king = TRUE
+borg_cheat_death = FALSE
+borg_respawn_winners = FALSE
+borg_respawn_class = -1
+borg_respawn_race = -1
+borg_chest_fail_tolerance = 7
+borg_delay_factor = 0
+borg_money_scum_amount = 0
+borg_self_scum = TRUE
+borg_lunal_mode = FALSE
+borg_self_lunal = FALSE
+borg_enchant_limit = 12
+borg_dump_level = 1
+borg_save_death = 1
+borg_stop_on_bell = FALSE
+borg_allow_strange_opts = FALSE
+borg_autosave = FALSE

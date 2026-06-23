@@ -30,6 +30,7 @@
 #include "../obj-pile.h"
 #include "../obj-power.h"
 #include "../obj-randart.h"
+#include "../ap-game.h"
 #include "../obj-tval.h"
 #include "../obj-util.h"
 #include "../player-birth.h"
@@ -595,6 +596,14 @@ void reincarnate_borg(void)
     /* Mark savefile as borg cheater */
     if (!(player->noscore & NOSCORE_BORG))
         player->noscore |= NOSCORE_BORG;
+
+    /*
+     * Archipelago: this is a brand-new character, so reconnect from scratch.
+     * The next process_player() ap_service() call re-auths to the same slot and
+     * replays our items (restocking the new home, re-applying boons) while the
+     * server keeps already-checked locations (killed uniques stay dead).
+     */
+    ap_game_reset_for_new_life();
 
     /* Done.  Play on */
 }

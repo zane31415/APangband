@@ -69,7 +69,9 @@ endif
 CC = $(CROSS)gcc
 WRES = $(CROSS)windres
 WARNINGS = -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers
-CFLAGS += $(WARNINGS) -std=c99 -DUSE_PRIVATE_PATHS -DSOUND -O2 -I.
+# -DALLOW_BORG enables the automatic player ("Borg"); the borg/*.c bodies are all
+# wrapped in #ifdef ALLOW_BORG, so without it they compile to nothing.
+CFLAGS += $(WARNINGS) -std=c99 -DUSE_PRIVATE_PATHS -DSOUND -DALLOW_BORG -O2 -I.
 
 # Archipelago client (vendored APCc): pull include/library flags for its
 # dependencies (jansson, libwebsockets, glib) from pkg-config in the MSYS2

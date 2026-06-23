@@ -17,6 +17,8 @@
  *    are included in all such copies.  Other copyrights may also apply.
  */
 #include "angband.h"
+#include "ap-game.h"
+#include "apinterface.h"
 #include "cave.h"
 #include "cmds.h"
 #include "game-event.h"
@@ -425,6 +427,12 @@ static void store_display_help(struct store_context *ctx)
 	text_out_c(COLOUR_L_GREEN, "I");
 	text_out(" inspects an item from your inventory. ");
 
+	/* Black Market: buying a missed Archipelago artifact location. */
+	if (store->feat == FEAT_STORE_BLACK && ap_artifacts_as_checks()) {
+		text_out_c(COLOUR_L_GREEN, "$");
+		text_out(" buys a missed Archipelago artifact location. ");
+	}
+
 	text_out_c(COLOUR_L_GREEN, "ESC");
 	if (!ctx->inspect_only)
 		text_out(" exits the building.");
@@ -481,6 +489,52 @@ static bool store_get_check(const char *prompt)
 /*
  * Sell an object, or drop if it we're in the home.
  */
+/**
+ * Black Market only: buy the location check of a "missed" Archipelago artifact.
+ *
+ * This fills gaps left by RNG-heavy artifact checks.  It offers the shallowest
+ * (ties: cheapest) still-unchecked artifact whose spawn depth the player has
+ * reached, for 3x its value, without naming it.  Buying sends the location
+ * check; whatever item sits there is released by the server normally.  The
+ * attributeless dungeon copy can still spawn (we only send a check, we do not
+ * mark the artifact created).
+ */
+static void store_buy_missed_ap_location(struct store_context *ctx)
+{
+	struct store *store = ctx->store;
+	const struct artifact *art;
+	int price = 0;
+
+	if (!store || store->feat != FEAT_STORE_BLACK) {
+		msg("Only the Black Market trades in Archipelago locations.");
+		return;
+	}
+
+	art = ap_find_missed_location(&price);
+	if (!art) {
+		msg("No missed Archipelago artifact locations are available.");
+		return;
+	}
+
+	if (price > player->au) {
+		msg("You cannot afford a missed location (%d gold).", price);
+		return;
+	}
+
+	if (!get_check(format("Buy a missed Archipelago artifact location for %d gold? ",
+			price)))
+		return;
+
+	/* Pay up, then register the check (the artifact itself is not granted). */
+	player->au -= price;
+	ap_buy_missed_location(art);
+
+	msg("You buy the whereabouts of a lost relic.");
+
+	player->upkeep->redraw |= (PR_GOLD);
+	event_signal(EVENT_STORECHANGED);
+}
+
 static bool store_sell(struct store_context *ctx)
 {
 	int amt;
@@ -797,11 +851,11 @@ static void store_menu_set_selections(struct menu *menu, bool knowledge_menu)
 	} else {
 		if (OPT(player, rogue_like_commands)) {
 			/* These two can't intersect! */
-			menu->cmd_keys = "\x04\x05\x10?={|}~CEIPTdegilpswx"; /* \x10 = ^p , \x04 = ^D, \x05 = ^E */
+			menu->cmd_keys = "$\x04\x05\x10?={|}~CEIPTdegilpswx"; /* $ = AP missed location, \x10 = ^p , \x04 = ^D, \x05 = ^E */
 			menu->selections = "abcfmnoqrtuvyzABDFGHJKLMNOQRSUVWXYZ";
 		} else {
 			/* These two can't intersect! */
-			menu->cmd_keys = "\x05\x010?={|}~CEIbdegiklpstwx"; /* \x05 = ^E, \x10 = ^p */
+			menu->cmd_keys = "$\x05\x010?={|}~CEIbdegiklpstwx"; /* $ = AP missed location, \x05 = ^E, \x10 = ^p */
 			menu->selections = "acfhjmnoqruvyzABDFGHJKLMNOPQRSTUVWXYZ";
 		}
 	}
@@ -1096,6 +1150,8 @@ static bool store_menu_handle(struct menu *m, const ui_event *event, int oid)
 		}
 	} else if (event->type == EVT_KBRD) {
 		switch (event->key.code) {
+			case '$': store_buy_missed_ap_location(ctx); break;
+
 			case 's':
 			case 'd': store_sell(ctx); break;
 

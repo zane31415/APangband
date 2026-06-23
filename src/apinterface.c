@@ -328,6 +328,35 @@ void ap_shutdown(void)
 	}
 
 	AP_Shutdown();
+
+	/*
+	 * Free the cross-thread queues (the thread is joined, so nothing else
+	 * touches them) along with any events still queued, then reset the
+	 * service-thread state.  This keeps a later reconnect -- ap_begin() makes
+	 * fresh queues -- from leaking the old ones, which matters for unattended
+	 * Borg respawn loops that tear down and rebuild the connection repeatedly.
+	 */
+	if (ap_out_q) {
+		struct ap_out_event *o;
+		while ((o = g_async_queue_try_pop(ap_out_q)) != NULL) {
+			g_free(o->name);
+			g_free(o);
+		}
+		g_async_queue_unref(ap_out_q);
+		ap_out_q = NULL;
+	}
+	if (ap_in_q) {
+		struct ap_in_event *e;
+		while ((e = g_async_queue_try_pop(ap_in_q)) != NULL) {
+			g_free(e->name);
+			g_free(e);
+		}
+		g_async_queue_unref(ap_in_q);
+		ap_in_q = NULL;
+	}
+
+	ap_item_seq = 0;
+	ap_pending_count = 0;
 	ap_started = false;
 	ap_announced = false;
 }

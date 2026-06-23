@@ -10,6 +10,7 @@
 #include "monster.h"
 #include "mon-util.h"
 #include "object.h"
+#include "obj-desc.h"
 #include "obj-gear.h"
 #include "obj-knowledge.h"
 #include "obj-make.h"
@@ -28,25 +29,140 @@
  * bounce that same death back out as another DeathLink. */
 static bool ap_dying_from_deathlink = false;
 
+/*
+ * Per-artifact "its location has been checked" flags, indexed by aidx (lazily
+ * allocated, z_info->a_max entries).  Populated by ap_check_confirmed -- which
+ * fires for both live checks and the on-connect replay -- so it reflects the
+ * server's view of which artifact locations are already found.  Drives the Black
+ * Market "buy a missed location" offer (ap_find_missed_location).  Not saved: a
+ * reconnect's replay rebuilds it.
+ */
+static bool *ap_artifact_checked = NULL;
+
+/** Ensure the checked-artifact table is allocated.  Returns false if it can't. */
+static bool ap_ensure_artifact_table(void)
+{
+	if (!ap_artifact_checked && z_info && z_info->a_max)
+		ap_artifact_checked = mem_zalloc(z_info->a_max * sizeof(bool));
+	return ap_artifact_checked != NULL;
+}
+
+/*
+ * Proper-named artifacts are stored quoted in artifact.txt ('Narthanc'), but the
+ * Archipelago location names drop the quotes ("Narthanc").  Copy art->name into
+ * buf with any wrapping single quotes stripped, so it matches the apworld.
+ */
+static void ap_artifact_bare_name(const struct artifact *art, char *buf, size_t len)
+{
+	size_t n;
+
+	if (!len) return;
+	my_strcpy(buf, art->name ? art->name : "", len);
+
+	n = strlen(buf);
+	if (n >= 2 && buf[0] == '\'' && buf[n - 1] == '\'') {
+		memmove(buf, buf + 1, n - 2);
+		buf[n - 2] = '\0';
+	}
+}
+
+/*
+ * Clean singular base-kind name ("Phial", "Bastard Sword") for an artifact's
+ * base object -- the form suffix artifacts use in their apworld location name.
+ * This must go through object_kind_name(), NOT raw kind->name, because kind names
+ * carry article/plural markers ("& Phial~") that object_desc strips; the apworld
+ * used the stripped form (it equals the artifact.txt base-object sval name).
+ */
+static void ap_artifact_base_name(const struct artifact *art, char *buf, size_t len)
+{
+	struct object_kind *kind = lookup_kind(art->tval, art->sval);
+
+	if (kind && kind->name)
+		object_kind_name(buf, len, kind, true);
+	else if (len)
+		buf[0] = '\0';
+}
+
+/*
+ * Send the location check for an artifact.  Its apworld location name is one of
+ * two forms and we can't tell which from here, so send both: the bare (de-
+ * quoted) name -- "Narthanc", "Angrist" -- and base-kind + name -- "Phial of
+ * Galadriel".  ap_send_check() drops whichever isn't a real location.
+ */
+static void ap_send_artifact_check(const struct artifact *art)
+{
+	char bare[120], base[120], full[120];
+
+	if (!art || !art->name) return;
+
+	ap_artifact_bare_name(art, bare, sizeof(bare));
+	ap_send_check(bare);
+
+	ap_artifact_base_name(art, base, sizeof(base));
+	if (base[0]) {
+		strnfmt(full, sizeof(full), "%s %s", base, bare);
+		ap_send_check(full);
+	}
+}
+
+/**
+ * Does \p name match \p art's Archipelago location name?  Compares against both
+ * naming forms (see ap_send_artifact_check).
+ */
+static bool ap_artifact_loc_matches(const struct artifact *art, const char *name)
+{
+	char bare[120], base[120], full[120];
+
+	if (!art->name) return false;
+
+	ap_artifact_bare_name(art, bare, sizeof(bare));
+	if (streq(name, bare)) return true;
+
+	ap_artifact_base_name(art, base, sizeof(base));
+	if (base[0]) {
+		strnfmt(full, sizeof(full), "%s %s", base, bare);
+		if (streq(name, full)) return true;
+	}
+
+	return false;
+}
+
+/** Record that the artifact location named \p name (if any) is now checked. */
+static void ap_mark_artifact_location_checked(const char *name)
+{
+	int i;
+
+	if (!ap_ensure_artifact_table()) return;
+
+	for (i = 1; i < z_info->a_max; i++) {
+		const struct artifact *art = &a_info[i];
+		if (art->name && ap_artifact_loc_matches(art, name)) {
+			ap_artifact_checked[art->aidx] = true;
+			return;
+		}
+	}
+}
+
 /**
  * A location check was confirmed for our slot.  This fires both for live checks
  * and -- crucially -- for the replay of every previously-checked location right
- * after connecting.  Locations are named after unique monsters (and artifacts);
- * for a unique we zero its max_num so it stays dead, including for a brand-new
- * character reincarnating into the same AP slot.
- *
- * Non-monster location names (artifacts) simply don't resolve to a race and are
- * ignored here.
+ * after connecting.  Locations are named after unique monsters and artifacts;
+ * for a unique we zero its max_num so it stays dead (including for a brand-new
+ * character reincarnating into the same AP slot), and for an artifact we note
+ * its location as found so the Black Market won't re-offer it.
  */
 static void ap_check_confirmed(const char *name)
 {
 	struct monster_race *race = lookup_monster(name);
 
-	if (!race) return;
-	if (!rf_has(race->flags, RF_UNIQUE)) return;
+	if (race) {
+		/* Killed for good: prevents this unique from being generated again. */
+		if (rf_has(race->flags, RF_UNIQUE))
+			race->max_num = 0;
+		return;
+	}
 
-	/* Killed for good: prevents this unique from being generated again. */
-	race->max_num = 0;
+	ap_mark_artifact_location_checked(name);
 }
 
 /*** Archipelago item delivery: name -> game effect ***/
@@ -179,6 +295,13 @@ static void ap_object_know(struct object *obj)
 	obj->known->notice |= OBJ_NOTICE_ASSESSED;
 	object_set_base_known(player, obj);
 	obj->known->notice |= OBJ_NOTICE_ASSESSED;
+	/*
+	 * Mark the known twin as the artifact, exactly as object_touch() does on a
+	 * normal pickup: object_is_known_artifact() (hence object_desc showing the
+	 * artifact's name) keys off obj->known->artifact, not obj->artifact.  NULL
+	 * for non-artifacts, so this is a no-op for ordinary granted items.
+	 */
+	obj->known->artifact = obj->artifact;
 	player_know_object(player, obj);
 	obj->origin = ORIGIN_NONE;
 }
@@ -521,6 +644,70 @@ void ap_game_player_won(void)
 	ap_send_victory();
 }
 
+const struct artifact *ap_find_missed_location(int *price_out)
+{
+	const struct artifact *best = NULL;
+	int i;
+
+	/* Only meaningful in artifacts-as-checks mode, once connected. */
+	if (!ap_artifacts_as_checks() || !ap_is_connected()) return NULL;
+	if (!ap_ensure_artifact_table() || !player) return NULL;
+
+	for (i = 1; i < z_info->a_max; i++) {
+		const struct artifact *art = &a_info[i];
+
+		if (!art->name) continue;
+		if (ap_artifact_checked[art->aidx]) continue;     /* already found */
+		if (art->alloc_prob <= 0) continue;               /* not a normal drop
+		                                                   * (story artifacts like
+		                                                   * Grond aren't AP
+		                                                   * locations) */
+		if (player->max_depth < art->alloc_min) continue; /* not yet deep enough */
+		if (art->cost <= 0) continue;                     /* need a price */
+
+		/* Lowest spawn depth first; break ties by the cheaper artifact. */
+		if (!best
+				|| art->alloc_min < best->alloc_min
+				|| (art->alloc_min == best->alloc_min && art->cost < best->cost))
+			best = art;
+	}
+
+	if (!best) return NULL;
+	if (price_out) *price_out = 3 * best->cost;
+	return best;
+}
+
+void ap_buy_missed_location(const struct artifact *art)
+{
+	if (!art) return;
+
+	/* Mark it found locally so we don't re-offer it before the server's
+	 * confirmation (and replay) comes back and sets the same flag. */
+	if (ap_ensure_artifact_table())
+		ap_artifact_checked[art->aidx] = true;
+
+	/*
+	 * Send the location check.  Whatever item sits at this location is released
+	 * by the server through the normal grant path -- we do not hand out the
+	 * artifact here.
+	 */
+	ap_send_artifact_check(art);
+}
+
+void ap_game_reset_for_new_life(void)
+{
+	/* A fresh character must receive the full item replay again. */
+	if (player) player->ap_items_received = 0;
+
+	/*
+	 * Drop the connection; process_player's next ap_service() call sees it is
+	 * down and reconnects with the (preserved) server/slotname, which re-fires
+	 * the Connected event -> checked-location replay (uniques stay dead) and
+	 * item replay (restock the new home, re-apply boons).
+	 */
+	ap_shutdown();
+}
+
 /**
  * Authentication finished.  The checked-location replay has already run (marking
  * known-dead uniques), so reconcile the other direction: send checks for any
@@ -545,25 +732,10 @@ static void ap_on_connected(void)
 
 void ap_game_item_picked_up(const struct object *obj)
 {
-	const struct artifact *art;
-	char full[120];
-
 	if (!obj || !obj->artifact) return;
 	if (!ap_artifacts_as_checks()) return;
 
-	art = obj->artifact;
-
-	/*
-	 * Artifact location names don't follow one rule: proper-named artifacts
-	 * are just the name ("Angrist"), while suffix artifacts are base + name
-	 * ("Phial" + " of Galadriel").  Send both forms; ap_send_check() ignores
-	 * the one that isn't a real location (the service thread resolves names).
-	 */
-	ap_send_check(art->name);
-	if (obj->kind && obj->kind->name) {
-		strnfmt(full, sizeof(full), "%s %s", obj->kind->name, art->name);
-		ap_send_check(full);
-	}
+	ap_send_artifact_check(obj->artifact);
 }
 
 void ap_game_setup(void)

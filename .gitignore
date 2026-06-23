@@ -6,6 +6,8 @@
 # Archipelago runtime / build artifacts.
 APCc_datapkg.cache
 /angband.apworld
+# Release artifacts assembled by scripts/make-release.ps1.
+/dist/
 *.exe
 *.gcda
 *.gcno
@@ -26,7 +28,9 @@ APCc_datapkg.cache
 .vs/
 /*.vcxproj*
 aclocal.m4
-angband
+# NB: do NOT add a bare "angband" here -- it would also match the angband/
+# apworld source dir. The Unix build binary is covered by /src/angband below.
+angband/__pycache__/
 angband.3dsx
 angband.nds
 angband.smdh
