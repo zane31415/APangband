@@ -36,15 +36,49 @@ static char ap_slot[64];
 static char ap_password[1];           /* empty for now: no password support */
 
 static bool ap_started = false;       /* AP_Init/AP_Start have been called */
-static bool ap_announced = false;     /* "connected" message already shown */
+static bool ap_announced = false;     /* "connected" handling already done */
 static bool ap_failed = false;        /* setup failed; don't keep retrying */
 
-/* --- Required APCc callbacks ------------------------------------------------
- *
- * These are intentionally thin for now.  Wiring received items and location
- * checks into actual Angband gameplay is the next milestone; for the moment we
- * just surface activity so a connection can be observed working.
+/* Handlers registered by the game-side glue (ap-game.c). */
+static void (*ap_check_handler)(const char *name) = NULL;
+static void (*ap_item_handler)(const char *item_name) = NULL;
+static void (*ap_connect_handler)(void) = NULL;
+
+/*
+ * Checked-location ids can arrive (as a replay) before the data package is
+ * loaded, so their names aren't resolvable yet.  Park them here and drain once
+ * the data package is synced.
  */
+#define AP_PENDING_MAX 1024
+static uint64_t ap_pending_checks[AP_PENDING_MAX];
+static int ap_pending_count = 0;
+
+/* --- Internal helpers ------------------------------------------------------ */
+
+/** Resolve a checked location id to its name and hand it to the game. */
+static void ap_deliver_check(uint64_t loc_id)
+{
+	char *name = AP_GetLocationName(loc_id);
+	if (ap_check_handler && name) ap_check_handler(name);
+}
+
+static void ap_pending_push(uint64_t loc_id)
+{
+	if (ap_pending_count < AP_PENDING_MAX)
+		ap_pending_checks[ap_pending_count++] = loc_id;
+	else
+		ap_deliver_check(loc_id);   /* overflow: best effort, deliver now */
+}
+
+static void ap_pending_drain(void)
+{
+	int i;
+	for (i = 0; i < ap_pending_count; i++)
+		ap_deliver_check(ap_pending_checks[i]);
+	ap_pending_count = 0;
+}
+
+/* --- Required APCc callbacks ----------------------------------------------- */
 
 static void ap_cb_item_clear(void)
 {
@@ -53,19 +87,26 @@ static void ap_cb_item_clear(void)
 
 static void ap_cb_item_recv(uint64_t item_id, int sending_player, bool notify)
 {
-	char buf[64];
+	char *name;
 
 	(void)sending_player;
-	if (!notify) return;
+	(void)notify;       /* deliver replays too: a fresh character's home is empty */
 
-	/* Angband's msg() formatter lacks %llu, so render the id with libc. */
-	snprintf(buf, sizeof(buf), "%llu", (unsigned long long)item_id);
-	msg("AP: received item %s.", buf);
+	name = AP_GetItemName(item_id);
+	if (ap_item_handler && name) ap_item_handler(name);
 }
 
 static void ap_cb_location_checked(uint64_t loc_id)
 {
-	(void)loc_id;
+	/*
+	 * If the data package is loaded we can resolve the name now; otherwise
+	 * defer (this happens for the checked-location replay that arrives with
+	 * the Connected packet, before the data package on a first connect).
+	 */
+	if (AP_GetDataPackageStatus() == Synced)
+		ap_deliver_check(loc_id);
+	else
+		ap_pending_push(loc_id);
 }
 
 /* --- Helpers --------------------------------------------------------------- */
@@ -137,9 +178,14 @@ void ap_service(const char *server, const char *slotname)
 
 	AP_WebService();
 
+	/* Once the data package is up, flush any checks deferred during connect. */
+	if (ap_pending_count > 0 && AP_GetDataPackageStatus() == Synced)
+		ap_pending_drain();
+
 	if (!ap_announced && AP_GetConnectionStatus() == Authenticated) {
 		ap_announced = true;
 		msg("AP: connected to Archipelago as '%s'.", ap_slot);
+		if (ap_connect_handler) ap_connect_handler();
 	}
 }
 
@@ -155,4 +201,29 @@ void ap_shutdown(void)
 		ap_started = false;
 		ap_announced = false;
 	}
+}
+
+void ap_send_check(const char *name)
+{
+	int64_t loc;
+
+	if (!ap_started || !name) return;
+	loc = AP_GetLocationIdByName(name);
+	if (loc < 0) return;            /* unknown location or data package not ready */
+	AP_SendItem((uint64_t)loc);
+}
+
+void ap_set_check_handler(void (*fn)(const char *name))
+{
+	ap_check_handler = fn;
+}
+
+void ap_set_item_handler(void (*fn)(const char *item_name))
+{
+	ap_item_handler = fn;
+}
+
+void ap_set_connect_handler(void (*fn)(void))
+{
+	ap_connect_handler = fn;
 }

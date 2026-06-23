@@ -161,6 +161,7 @@ ALLMAINFILES = \
 
 ANGFILES0 = \
 	apcc/APCc.o \
+	ap-game.o \
 	apinterface.o \
 	cave.o \
 	cave-map.o \

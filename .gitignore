@@ -1,6 +1,8 @@
 *.app
 *.dll
 *.elf
+# Reference copy of the Manual apworld; not part of the game source tree.
+/manual_angband425_broney/
 *.exe
 *.gcda
 *.gcno

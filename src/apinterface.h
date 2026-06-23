@@ -9,6 +9,11 @@
  * with Angband's PF_* player flags in player.h -- so callers pass the connection
  * details in as plain strings rather than apinterface.c including player.h.
  * Only apinterface.c includes apcc/APCc.h.
+ *
+ * Game-side logic that needs Angband headers (marking uniques dead, stocking the
+ * home, etc.) lives in ap-game.c and registers callbacks here via the
+ * ap_set_*_handler() functions; this file translates AP item/location ids to
+ * names and routes them to those handlers.
  */
 #ifndef APINTERFACE_H
 #define APINTERFACE_H
@@ -31,5 +36,35 @@ bool ap_is_connected(void);
 
 /** Tear down the Archipelago connection (call on game exit). */
 void ap_shutdown(void);
+
+/**
+ * Send the location check named \p name (e.g. a unique monster's name) to the
+ * server.  No-op if not connected, the data package isn't loaded yet, or the
+ * name isn't a known AP location.  The server de-duplicates already-sent checks.
+ */
+void ap_send_check(const char *name);
+
+/**
+ * Register the handler called when a location is confirmed checked for this slot
+ * -- including replays of all previously-checked locations right after
+ * connecting (used to keep killed uniques dead across character deaths).  The
+ * handler receives the location's name.
+ */
+void ap_set_check_handler(void (*fn)(const char *name));
+
+/**
+ * Register the handler called when an item is granted to this slot -- including
+ * replays of all previously-received items on connect (used to stock the home).
+ * The handler receives the item's name.
+ */
+void ap_set_item_handler(void (*fn)(const char *item_name));
+
+/**
+ * Register the handler called once when the slot finishes authenticating.  Fires
+ * after the initial checked-location replay, so it is a good place to reconcile
+ * game state with the server (e.g. send checks for uniques already dead in the
+ * save file from a kill made while offline).
+ */
+void ap_set_connect_handler(void (*fn)(void));
 
 #endif /* APINTERFACE_H */

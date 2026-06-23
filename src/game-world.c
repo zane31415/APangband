@@ -17,6 +17,7 @@
  */
 
 #include "angband.h"
+#include "ap-game.h"
 #include "apinterface.h"
 #include "cmds.h"
 #include "effects.h"
@@ -933,6 +934,13 @@ static void process_player_cleanup(void)
  */
 void process_player(void)
 {
+	/* Register Archipelago game-side handlers once, before the first service. */
+	static bool ap_handlers_ready = false;
+	if (!ap_handlers_ready) {
+		ap_game_setup();
+		ap_handlers_ready = true;
+	}
+
 	/* Service the Archipelago connection (connects lazily on first call). */
 	ap_service(player->server, player->slotname);
 

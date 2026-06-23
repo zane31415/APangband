@@ -105,6 +105,9 @@ void AP_SetDeathLinkSupported(bool);
 /* Name Lookup Functions */
 char* AP_GetLocationName(uint64_t id);
 char* AP_GetItemName(uint64_t id);
+/* Local additions (not upstream): reverse name -> id lookups; -1 if unknown. */
+int64_t AP_GetLocationIdByName(const char* name);
+int64_t AP_GetItemIdByName(const char* name);
 json_t* AP_GetLocalHints();
 char* AP_GetLocalHintDataPrefix();
 

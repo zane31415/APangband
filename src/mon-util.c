@@ -17,6 +17,7 @@
  */
 
 #include "angband.h"
+#include "apinterface.h"
 #include "cmd-core.h"
 #include "effects.h"
 #include "game-world.h"
@@ -1088,6 +1089,9 @@ static void player_kill_monster(struct monster *mon, struct player *p,
 		char unique_name[80];
 		assert(mon->original_race == NULL);
 		mon->race->max_num = 0;
+
+		/* Archipelago: this unique kill is a location check. */
+		ap_send_check(mon->race->name);
 
 		/*
 		 * This gets the correct name if we slay an invisible

@@ -1927,6 +1927,46 @@ char* AP_GetItemName(uint64_t id) {
     return getItemName(ap_game, id);
 }
 
+/*
+ * Local addition (not in upstream APCc): reverse lookups from a name to its
+ * numeric id for the connected game, by scanning the data-package maps.  Needed
+ * so the host game can refer to checks/items by name instead of hardcoding ids.
+ * Returns -1 if the data package isn't loaded yet or the name is unknown.
+ */
+static int64_t AP_GetIdByName_(GHashTable* (*pick)(struct AP_GameData*),
+                               const char* name) {
+    GString* gs_key;
+    struct AP_GameData* gamedata;
+    GHashTable* table;
+    GHashTableIter iter;
+    gpointer k, v;
+
+    if (!map_game_to_data || !name) return -1;
+    gs_key = g_string_new(ap_game);
+    gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
+    g_string_free(gs_key, TRUE);
+    if (!gamedata) return -1;
+
+    table = pick(gamedata);
+    g_hash_table_iter_init(&iter, table);
+    while (g_hash_table_iter_next(&iter, &k, &v)) {
+        if (v && strcmp((const char*)v, name) == 0)
+            return *(int64_t*)k;
+    }
+    return -1;
+}
+
+static GHashTable* pick_location_data_(struct AP_GameData* gd) { return gd->location_data; }
+static GHashTable* pick_item_data_(struct AP_GameData* gd) { return gd->item_data; }
+
+int64_t AP_GetLocationIdByName(const char* name) {
+    return AP_GetIdByName_(pick_location_data_, name);
+}
+
+int64_t AP_GetItemIdByName(const char* name) {
+    return AP_GetIdByName_(pick_item_data_, name);
+}
+
 char* AP_GetLocalHintDataPrefix() {
     char* buffer = (char*)malloc(32);
     if (buffer == NULL) {
