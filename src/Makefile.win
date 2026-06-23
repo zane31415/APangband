@@ -55,17 +55,34 @@ ifdef CONSOLE
 else
   CFLAGS = -DWINDOWS -static
 
-  CFLAGS += -Iwin/include -Lwin/lib
-  LDFLAGS += -Lwin/lib
+  # libpng/zlib come from MSYS2's MinGW packages (the bundled win/lib/*.lib are
+  # MSVC-format and unusable by MinGW's linker).  readpng.c/scrnshot.c use only
+  # the modern accessor API, so libpng 1.6 works fine.
+  PNG_CFLAGS := $(shell pkg-config --cflags libpng zlib)
+  PNG_LIBS := $(shell pkg-config --libs libpng zlib)
+  CFLAGS += $(PNG_CFLAGS)
 
   IOBJS = $(BASEOBJS) win/$(PROGNAME).res $(SOUNDFILES) main-win.o win/readdib.o win/readpng.o win/scrnshot.o win/win-layout.o
-  LIBS = -mwindows -lwinmm -lzlib -llibpng -lmsimg32
+  LIBS = -mwindows -lwinmm -lmsimg32 -Wl,-Bdynamic $(PNG_LIBS)
 endif
 
 CC = $(CROSS)gcc
 WRES = $(CROSS)windres
 WARNINGS = -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers
 CFLAGS += $(WARNINGS) -std=c99 -DUSE_PRIVATE_PATHS -DSOUND -O2 -I.
+
+# Archipelago client (vendored APCc): pull include/library flags for its
+# dependencies (jansson, libwebsockets, glib) from pkg-config in the MSYS2
+# MinGW environment.  PKG_CONFIG may be overridden on the command line.
+PKG_CONFIG ?= pkg-config
+AP_PKGS = jansson libwebsockets glib-2.0
+AP_CFLAGS := $(shell $(PKG_CONFIG) --cflags $(AP_PKGS))
+AP_LIBS := $(shell $(PKG_CONFIG) --libs $(AP_PKGS))
+CFLAGS += $(AP_CFLAGS)
+# The Windows front end links with -static, but the AP dependencies are shipped
+# as MinGW DLLs (like libpng12/zlib1 already are), so force dynamic linking for
+# just those libraries.
+LIBS += -Wl,-Bdynamic $(AP_LIBS)
 
 ifdef BUILD_ID
   CFLAGS += -DBUILD_ID="$(BUILD_ID)"
@@ -112,10 +129,22 @@ endif
 # Targets
 #
 
+# Runtime DLLs (from the MinGW toolchain) pulled in by the Archipelago client
+# (jansson/libwebsockets/glib + their deps) and by libpng/zlib.  Copy them next
+# to the executable so it can be launched outside the MSYS2 shell.  Version
+# suffixes track the current MSYS2 packages; the leading '-' ignores any that
+# are absent so this never breaks the build.
+MINGW_BIN := $(dir $(shell which $(CC)))
+RUNTIME_DLLS = libwebsockets.dll libjansson-4.dll libglib-2.0-0.dll libintl-8.dll \
+	libcrypto-3-x64.dll libssl-3-x64.dll libpcre2-8-0.dll libiconv-2.dll \
+	libwinpthread-1.dll libpng16-16.dll zlib1.dll
+
+# This target uses the MSYS2 shell's cp (not $(CP), which the makefile's legacy
+# "dos" detection resolves to cmd.exe's copy) because the Archipelago build
+# requires the MSYS2/MinGW environment anyway.
 ../$(EXE): $(EXE)
-	$(CP) $(EXE) ..
-	$(CP) win$(BAR)dll$(BAR)libpng12.dll ..
-	$(CP) win$(BAR)dll$(BAR)zlib1.dll ..
+	cp $(EXE) ..
+	-@for d in $(RUNTIME_DLLS); do cp "$(MINGW_BIN)$$d" .. 2>/dev/null; done
 
 $(EXE): $(OBJS)
 	$(CC) $(CFLAGS) -o $(EXE) $(OBJS) $(LIBS)
@@ -135,3 +164,7 @@ win/$(PROGNAME).res: win/$(PROGNAME).rc
 
 $(OBJDIR)%.o: %.c $(INCS)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# The vendored APCc client predates modern GCC's promotion of these warnings to
+# hard errors; relax them for just that third-party object.
+$(OBJDIR)apcc/APCc.o: CFLAGS += -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-discarded-qualifiers

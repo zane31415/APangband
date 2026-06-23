@@ -17,6 +17,7 @@
  */
 
 #include "angband.h"
+#include "apinterface.h"
 #include "cmds.h"
 #include "effects.h"
 #include "game-world.h"
@@ -932,6 +933,9 @@ static void process_player_cleanup(void)
  */
 void process_player(void)
 {
+	/* Service the Archipelago connection (connects lazily on first call). */
+	ap_service(player->server, player->slotname);
+
 	/* Check for interrupts */
 	player_resting_complete_special(player);
 	event_signal(EVENT_CHECK_INTERRUPT);

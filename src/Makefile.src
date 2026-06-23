@@ -160,6 +160,8 @@ ALLMAINFILES = \
 	$(SPOILMAINFILES)
 
 ANGFILES0 = \
+	apcc/APCc.o \
+	apinterface.o \
 	cave.o \
 	cave-map.o \
 	cave-square.o \
