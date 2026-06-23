@@ -19,6 +19,7 @@
 #define APINTERFACE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /**
  * Service the Archipelago connection.
@@ -55,9 +56,27 @@ void ap_set_check_handler(void (*fn)(const char *name));
 /**
  * Register the handler called when an item is granted to this slot -- including
  * replays of all previously-received items on connect (used to stock the home).
- * The handler receives the item's name.
+ * The handler receives the item's name and its stable 0-based sequence index in
+ * this slot's received-items stream (the same item always has the same index
+ * across reconnects), so the game can persist a per-character high-water mark
+ * and avoid re-delivering items it has already placed.
  */
-void ap_set_item_handler(void (*fn)(const char *item_name));
+void ap_set_item_handler(void (*fn)(const char *item_name, uint64_t index));
+
+/**
+ * \return true if \p name is a location the connected game knows about (its data
+ * package is loaded and contains it).  Lets the game pick among candidate names
+ * (e.g. artifact naming variants) before sending a check.
+ */
+bool ap_location_known(const char *name);
+
+/**
+ * \return true if the server's slot_data enabled the "artifacts as checks" mode
+ * (slot_data key "artifacts_as_checks"): artifacts become AP location checks and
+ * the real artifacts are granted as items, instead of spawning normally.
+ * Defaults to false until/unless the server sends the option.
+ */
+bool ap_artifacts_as_checks(void);
 
 /**
  * Register the handler called once when the slot finishes authenticating.  Fires

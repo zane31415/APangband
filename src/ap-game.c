@@ -9,6 +9,7 @@
 #include "init.h"
 #include "monster.h"
 #include "mon-util.h"
+#include "object.h"
 #include "apinterface.h"
 #include "ap-game.h"
 
@@ -45,9 +46,19 @@ static void ap_check_confirmed(const char *name)
  * reconnecting the same character doesn't re-stock items already in the home
  * (track a high-water mark of granted items in the save file).
  */
-static void ap_item_granted(const char *item_name)
+static void ap_item_granted(const char *item_name, uint64_t index)
 {
-	msg("AP: received '%s' (home delivery not yet implemented).", item_name);
+	/*
+	 * TODO: stock the home with this item.  Use a per-character high-water
+	 * mark saved in the player file: only deliver when index >= mark, then
+	 * set mark = index + 1.  A fresh character starts at mark 0 and receives
+	 * the full replay (empty home gets restocked); the same character
+	 * reconnecting has mark past the replay and adds nothing.  Item->object
+	 * mapping (specific artifacts, consumables, progressives, non-object
+	 * boons) is still to be designed.
+	 */
+	msg("AP: received item #%lu '%s' (home delivery not yet implemented).",
+		(unsigned long)index, item_name);
 }
 
 /**
@@ -70,6 +81,38 @@ static void ap_on_connected(void)
 
 		ap_send_check(race->name);
 	}
+}
+
+void ap_game_item_picked_up(const struct object *obj)
+{
+	const struct artifact *art;
+	char full[120];
+
+	if (!obj || !obj->artifact) return;
+	if (!ap_artifacts_as_checks()) return;
+
+	art = obj->artifact;
+
+	/*
+	 * Artifact location names don't follow one rule: proper-named artifacts
+	 * are just the name ("Angrist"), while suffix artifacts are base + name
+	 * ("Phial" + " of Galadriel").  Try both forms and send whichever the
+	 * data package actually contains.
+	 */
+	if (ap_location_known(art->name)) {
+		ap_send_check(art->name);
+		return;
+	}
+
+	if (obj->kind && obj->kind->name) {
+		strnfmt(full, sizeof(full), "%s %s", obj->kind->name, art->name);
+		if (ap_location_known(full)) {
+			ap_send_check(full);
+			return;
+		}
+	}
+
+	msg("AP: no location matched artifact '%s'.", art->name);
 }
 
 void ap_game_setup(void)

@@ -18,6 +18,7 @@
  */
 
 #include "angband.h"
+#include "ap-game.h"
 #include "cave.h"
 #include "cmds.h"
 #include "game-event.h"
@@ -241,6 +242,9 @@ static void player_pickup_aux(struct player *p, struct object *obj,
 	/* Confirm at least some of the object can be picked up */
 	if (max == 0)
 		quit_fmt("Failed pickup of %s", obj->kind->name);
+
+	/* Archipelago: picking up a (stripped) artifact sends its location check. */
+	ap_game_item_picked_up(obj);
 
 	/* Set ignore status */
 	p->upkeep->notice |= PN_IGNORE;

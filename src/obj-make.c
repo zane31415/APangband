@@ -18,6 +18,7 @@
 
 #include "angband.h"
 #include "alloc.h"
+#include "apinterface.h"
 #include "cave.h"
 #include "effects.h"
 #include "init.h"
@@ -628,8 +629,15 @@ static struct object *make_artifact_special(int level, int tval)
 		/* Mark the item as an artifact */
 		new_obj->artifact = art;
 
-		/* Copy across all the data from the artifact struct */
-		/*copy_artifact_data(new_obj, art);*/
+		/*
+		 * Copy across all the data from the artifact struct -- unless
+		 * Archipelago's artifacts-as-checks mode is on, in which case the
+		 * artifact spawns as an attributeless named item that acts as a
+		 * location check when picked up; the real artifact is granted as
+		 * an AP item instead.
+		 */
+		if (!ap_artifacts_as_checks())
+			copy_artifact_data(new_obj, art);
 
 		/* Mark the artifact as "created" */
 		mark_artifact_created(art, true);
@@ -707,7 +715,9 @@ static bool make_artifact(struct object *obj)
 	}
 
 	if (obj->artifact) {
-		/*copy_artifact_data(obj, obj->artifact);*/
+		/* Attributeless when AP turns artifacts into checks (see above). */
+		if (!ap_artifacts_as_checks())
+			copy_artifact_data(obj, obj->artifact);
 		mark_artifact_created(obj->artifact, true);
 		return true;
 	}

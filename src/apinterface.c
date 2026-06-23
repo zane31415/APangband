@@ -41,8 +41,19 @@ static bool ap_failed = false;        /* setup failed; don't keep retrying */
 
 /* Handlers registered by the game-side glue (ap-game.c). */
 static void (*ap_check_handler)(const char *name) = NULL;
-static void (*ap_item_handler)(const char *item_name) = NULL;
+static void (*ap_item_handler)(const char *item_name, uint64_t index) = NULL;
 static void (*ap_connect_handler)(void) = NULL;
+
+/* slot_data: artifacts-as-checks mode (set from the server on connect). */
+static bool ap_opt_artifacts_as_checks = false;
+
+/*
+ * Stable 0-based index of each received item.  APCc invokes the item-clear
+ * callback (on connect, before replaying items) and then delivers every item in
+ * order, so resetting this counter on clear and bumping it per item yields the
+ * same index for the same item on every reconnect.
+ */
+static uint64_t ap_item_seq = 0;
 
 /*
  * Checked-location ids can arrive (as a replay) before the data package is
@@ -82,7 +93,8 @@ static void ap_pending_drain(void)
 
 static void ap_cb_item_clear(void)
 {
-	/* Reset local item state on (re)sync.  Nothing to do yet. */
+	/* (Re)sync is starting: items are about to be replayed from the top. */
+	ap_item_seq = 0;
 }
 
 static void ap_cb_item_recv(uint64_t item_id, int sending_player, bool notify)
@@ -93,7 +105,16 @@ static void ap_cb_item_recv(uint64_t item_id, int sending_player, bool notify)
 	(void)notify;       /* deliver replays too: a fresh character's home is empty */
 
 	name = AP_GetItemName(item_id);
-	if (ap_item_handler && name) ap_item_handler(name);
+	if (ap_item_handler && name) ap_item_handler(name, ap_item_seq);
+
+	/* Advance even with no handler/name so indices stay aligned with AP. */
+	ap_item_seq++;
+}
+
+/* slot_data int callback.  APCc passes a pointer to the value (see APCc.c). */
+static void ap_cb_slotdata_artifacts(uint64_t *val)
+{
+	ap_opt_artifacts_as_checks = (val && *val != 0);
 }
 
 static void ap_cb_location_checked(uint64_t loc_id)
@@ -161,6 +182,14 @@ static void ap_begin(const char *server, const char *slotname)
 	AP_SetItemRecvCallback(ap_cb_item_recv);
 	AP_SetLocationCheckedCallback(ap_cb_location_checked);
 
+	/*
+	 * Watch for the artifacts-as-checks option in slot_data.  APCc actually
+	 * invokes int slot-data callbacks with a uint64_t* (its header's by-value
+	 * declaration is inaccurate), so register with a matching cast.
+	 */
+	AP_RegisterSlotDataIntCallback("artifacts_as_checks",
+		(void (*)(uint64_t))ap_cb_slotdata_artifacts);
+
 	AP_Init(ap_host, port, AP_GAME_NAME, ap_slot, ap_password);
 	AP_Start();
 
@@ -213,14 +242,24 @@ void ap_send_check(const char *name)
 	AP_SendItem((uint64_t)loc);
 }
 
+bool ap_location_known(const char *name)
+{
+	return ap_started && name && AP_GetLocationIdByName(name) >= 0;
+}
+
 void ap_set_check_handler(void (*fn)(const char *name))
 {
 	ap_check_handler = fn;
 }
 
-void ap_set_item_handler(void (*fn)(const char *item_name))
+void ap_set_item_handler(void (*fn)(const char *item_name, uint64_t index))
 {
 	ap_item_handler = fn;
+}
+
+bool ap_artifacts_as_checks(void)
+{
+	return ap_opt_artifacts_as_checks;
 }
 
 void ap_set_connect_handler(void (*fn)(void))
