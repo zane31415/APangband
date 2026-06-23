@@ -10,8 +10,15 @@
 #include "monster.h"
 #include "mon-util.h"
 #include "object.h"
+#include "player.h"
+#include "player-util.h"
+#include "store.h"
 #include "apinterface.h"
 #include "ap-game.h"
+
+/* Set while killing the player in response to a received DeathLink, so we don't
+ * bounce that same death back out as another DeathLink. */
+static bool ap_dying_from_deathlink = false;
 
 /**
  * A location check was confirmed for our slot.  This fires both for live checks
@@ -46,19 +53,75 @@ static void ap_check_confirmed(const char *name)
  * reconnecting the same character doesn't re-stock items already in the home
  * (track a high-water mark of granted items in the save file).
  */
+/**
+ * Turn an Archipelago item name into a game object to place in the home.
+ *
+ * TODO: the actual name->object mapping.  Cases to handle:
+ *   - specific artifacts (e.g. "Pick of Erebor") via lookup_artifact_name();
+ *   - consumables ("Rod of Recall", "Scroll of Acquirement", potions...) via
+ *     object kind, with any leading quantity in the name;
+ *   - "Progressive <Category> Artifact": the Nth artifact of that category,
+ *     categories ordered by artifact.txt 'level' (depth);
+ *   - non-object boons ("+5 levels of Experience", "Triple Starting Gold",
+ *     "Expanded Starting Shop Books") need separate, non-home handling.
+ * Returns NULL until implemented, so nothing is placed yet.
+ */
+static struct object *ap_make_item(const char *name)
+{
+	(void)name;
+	return NULL;
+}
+
+/** Deliver a single granted item into the player's home. */
+static void ap_deliver_item(const char *name)
+{
+	struct object *obj = ap_make_item(name);
+
+	if (!obj) {
+		msg("AP: '%s' has no home delivery mapping yet.", name);
+		return;
+	}
+
+	home_carry(obj);
+	msg("AP: '%s' delivered to your home.", name);
+}
+
+/**
+ * An item was granted to our slot, with a stable per-slot sequence index.
+ *
+ * De-duplication is per character via a high-water mark in the save file: a
+ * fresh character starts at 0 and receives the full replay (restocking its empty
+ * home), while the same character reconnecting has its mark past the replay and
+ * adds nothing.  This is why we can't use APCc's server-side notify flag.
+ */
 static void ap_item_granted(const char *item_name, uint64_t index)
 {
-	/*
-	 * TODO: stock the home with this item.  Use a per-character high-water
-	 * mark saved in the player file: only deliver when index >= mark, then
-	 * set mark = index + 1.  A fresh character starts at mark 0 and receives
-	 * the full replay (empty home gets restocked); the same character
-	 * reconnecting has mark past the replay and adds nothing.  Item->object
-	 * mapping (specific artifacts, consumables, progressives, non-object
-	 * boons) is still to be designed.
-	 */
-	msg("AP: received item #%lu '%s' (home delivery not yet implemented).",
-		(unsigned long)index, item_name);
+	if (!player) return;
+
+	/* Already delivered to this character. */
+	if (index < player->ap_items_received) return;
+
+	ap_deliver_item(item_name);
+
+	/* Advance the contiguous high-water mark past this item. */
+	player->ap_items_received = (uint32_t)(index + 1);
+}
+
+/** A DeathLink arrived: kill the player (without bouncing it back out). */
+static void ap_deathlink_received(void)
+{
+	if (!player || player->is_dead) return;
+
+	ap_dying_from_deathlink = true;
+	take_hit(player, 32000, "an Archipelago death");
+	ap_dying_from_deathlink = false;
+}
+
+void ap_game_player_died(void)
+{
+	/* Don't echo a received DeathLink back to the multiworld. */
+	if (ap_dying_from_deathlink) return;
+	ap_send_deathlink();
 }
 
 /**
@@ -120,4 +183,5 @@ void ap_game_setup(void)
 	ap_set_check_handler(ap_check_confirmed);
 	ap_set_item_handler(ap_item_granted);
 	ap_set_connect_handler(ap_on_connected);
+	ap_set_deathlink_handler(ap_deathlink_received);
 }

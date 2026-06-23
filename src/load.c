@@ -661,6 +661,11 @@ int rd_player(void)
 	rd_string(player->full_name, sizeof(player->full_name));
 	rd_string(player->server, sizeof(player->server));
 	rd_string(player->slotname, sizeof(player->slotname));
+	/* Archipelago item-delivery high-water mark (player block v2+). */
+	if (rd_loaded_version() >= 2)
+		rd_u32b(&player->ap_items_received);
+	else
+		player->ap_items_received = 0;
 	rd_string(player->died_from, 80);
 	player->history = mem_zalloc(250);
 	rd_string(player->history, 250);

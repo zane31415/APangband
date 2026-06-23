@@ -111,7 +111,7 @@ static const struct {
 	{ "monster memory", wr_monster_memory, 1 },
 	{ "object memory", wr_object_memory, 1 },
 	{ "quests", wr_quests, 1 },
-	{ "player", wr_player, 1 },
+	{ "player", wr_player, 2 },
 	{ "ignore", wr_ignore, 1 },
 	{ "misc", wr_misc, 1 },
 	{ "artifacts", wr_artifacts, 1 },
@@ -139,6 +139,7 @@ static const struct blockinfo loaders[] = {
 	{ "object memory", rd_object_memory, 1 },
 	{ "quests", rd_quests, 1 },
 	{ "player", rd_player, 1 },
+	{ "player", rd_player, 2 },
 	{ "ignore", rd_ignore, 1 },
 	{ "misc", rd_misc, 1 },
 	{ "artifacts", rd_artifacts, 1 },
@@ -519,6 +520,17 @@ static loader_t find_loader(struct blockheader *b,
 }
 
 /**
+ * Version of the block currently being loaded, so loaders shared across block
+ * versions can decide whether to read version-specific fields.
+ */
+static uint32_t loaded_block_version = 0;
+
+uint32_t rd_loaded_version(void)
+{
+	return loaded_block_version;
+}
+
+/**
  * Load a given block with the given loader
  */
 static bool load_block(ang_file *f, struct blockheader *b, loader_t loader)
@@ -527,6 +539,7 @@ static bool load_block(ang_file *f, struct blockheader *b, loader_t loader)
 	buffer = mem_alloc(b->size);
 	buffer_pos = 0;
 	buffer_check = 0;
+	loaded_block_version = b->version;
 
 	buffer_size = file_read(f, (char *) buffer, b->size);
 	if (buffer_size != b->size ||

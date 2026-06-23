@@ -79,6 +79,18 @@ bool ap_location_known(const char *name);
 bool ap_artifacts_as_checks(void);
 
 /**
+ * Send a DeathLink to other linked players (call when the local player dies of
+ * something other than a received DeathLink).  No-op if not connected.
+ */
+void ap_send_deathlink(void);
+
+/**
+ * Register the handler called when a DeathLink is received from another player.
+ * The handler should kill the local player.
+ */
+void ap_set_deathlink_handler(void (*fn)(void));
+
+/**
  * Register the handler called once when the slot finishes authenticating.  Fires
  * after the initial checked-location replay, so it is a good place to reconcile
  * game state with the server (e.g. send checks for uniques already dead in the

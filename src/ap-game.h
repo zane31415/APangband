@@ -22,4 +22,10 @@ void ap_game_setup(void);
  */
 void ap_game_item_picked_up(const struct object *obj);
 
+/**
+ * Report that the player has died, broadcasting a DeathLink to other players
+ * (unless this death was itself caused by a received DeathLink).
+ */
+void ap_game_player_died(void);
+
 #endif /* AP_GAME_H */

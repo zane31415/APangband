@@ -61,6 +61,7 @@ void savefile_get_panic_name(char *buffer, size_t len, const char *path);
 
 /* Utility */
 void note(const char *msg);
+uint32_t rd_loaded_version(void);
 
 /* Writing bits */
 void wr_byte(uint8_t v);

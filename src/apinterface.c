@@ -43,6 +43,7 @@ static bool ap_failed = false;        /* setup failed; don't keep retrying */
 static void (*ap_check_handler)(const char *name) = NULL;
 static void (*ap_item_handler)(const char *item_name, uint64_t index) = NULL;
 static void (*ap_connect_handler)(void) = NULL;
+static void (*ap_deathlink_handler)(void) = NULL;
 
 /* slot_data: artifacts-as-checks mode (set from the server on connect). */
 static bool ap_opt_artifacts_as_checks = false;
@@ -182,6 +183,9 @@ static void ap_begin(const char *server, const char *slotname)
 	AP_SetItemRecvCallback(ap_cb_item_recv);
 	AP_SetLocationCheckedCallback(ap_cb_location_checked);
 
+	/* DeathLink: advertise support; the server enables it via slot_data. */
+	AP_SetDeathLinkSupported(true);
+
 	/*
 	 * Watch for the artifacts-as-checks option in slot_data.  APCc actually
 	 * invokes int slot-data callbacks with a uint64_t* (its header's by-value
@@ -210,6 +214,12 @@ void ap_service(const char *server, const char *slotname)
 	/* Once the data package is up, flush any checks deferred during connect. */
 	if (ap_pending_count > 0 && AP_GetDataPackageStatus() == Synced)
 		ap_pending_drain();
+
+	/* Deliver an incoming DeathLink to the game. */
+	if (AP_DeathLinkPending()) {
+		AP_DeathLinkClear();
+		if (ap_deathlink_handler) ap_deathlink_handler();
+	}
 
 	if (!ap_announced && AP_GetConnectionStatus() == Authenticated) {
 		ap_announced = true;
@@ -265,4 +275,14 @@ bool ap_artifacts_as_checks(void)
 void ap_set_connect_handler(void (*fn)(void))
 {
 	ap_connect_handler = fn;
+}
+
+void ap_send_deathlink(void)
+{
+	if (ap_is_connected()) AP_DeathLinkSend();
+}
+
+void ap_set_deathlink_handler(void (*fn)(void))
+{
+	ap_deathlink_handler = fn;
 }

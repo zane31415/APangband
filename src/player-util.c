@@ -17,6 +17,7 @@
  */
 
 #include "angband.h"
+#include "ap-game.h"
 #include "cave.h"
 #include "cmd-core.h"
 #include "game-input.h"
@@ -255,6 +256,9 @@ void take_hit(struct player *p, int dam, const char *kb_str)
 
 				/* Note death */
 				p->is_dead = true;
+
+				/* Archipelago: broadcast our death to linked players. */
+				ap_game_player_died();
 
 				/* Dead */
 				return;

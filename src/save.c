@@ -422,6 +422,7 @@ void wr_player(void)
 	wr_string(player->full_name);
 	wr_string(player->server);
 	wr_string(player->slotname);
+	wr_u32b(player->ap_items_received);
 
 	wr_string(player->died_from);
 
