@@ -159,23 +159,14 @@ void ap_game_item_picked_up(const struct object *obj)
 	/*
 	 * Artifact location names don't follow one rule: proper-named artifacts
 	 * are just the name ("Angrist"), while suffix artifacts are base + name
-	 * ("Phial" + " of Galadriel").  Try both forms and send whichever the
-	 * data package actually contains.
+	 * ("Phial" + " of Galadriel").  Send both forms; ap_send_check() ignores
+	 * the one that isn't a real location (the service thread resolves names).
 	 */
-	if (ap_location_known(art->name)) {
-		ap_send_check(art->name);
-		return;
-	}
-
+	ap_send_check(art->name);
 	if (obj->kind && obj->kind->name) {
 		strnfmt(full, sizeof(full), "%s %s", obj->kind->name, art->name);
-		if (ap_location_known(full)) {
-			ap_send_check(full);
-			return;
-		}
+		ap_send_check(full);
 	}
-
-	msg("AP: no location matched artifact '%s'.", art->name);
 }
 
 void ap_game_setup(void)

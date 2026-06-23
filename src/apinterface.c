@@ -7,6 +7,17 @@
  * through the small API declared in apinterface.h, and passes connection
  * details in as plain strings so that this file never has to include player.h
  * (whose PF_* player flags collide with winsock's PF_* protocol families).
+ *
+ * Threading: libwebsockets' lws_service() blocks waiting for I/O (seconds when
+ * idle), so it cannot be called from the game's main loop without freezing the
+ * game on every turn.  Instead a dedicated service thread owns all APCc/lws
+ * interaction, and exchanges events with the game thread through two
+ * thread-safe queues:
+ *   - ap_in_q  (service -> game): received items, confirmed checks, "connected",
+ *     and incoming DeathLinks, with names already resolved on the service thread.
+ *   - ap_out_q (game -> service): location checks and DeathLinks to send.
+ * The game thread only ever touches the queues (cheap); AP_WakeService() pokes
+ * the blocked lws_service() so queued sends go out promptly.
  */
 
 /*
@@ -28,69 +39,63 @@
 
 /*
  * APCc's AP_Init() stores the ip/player-name/password *pointers* (not copies)
- * and dereferences them later from AP_WebService().  Keep our own static
- * storage so the strings outlive the call that starts the connection.
+ * and dereferences them later, so keep our own static storage for them.
  */
 static char ap_host[128];
 static char ap_slot[64];
 static char ap_password[1];           /* empty for now: no password support */
 
-static bool ap_started = false;       /* AP_Init/AP_Start have been called */
-static bool ap_announced = false;     /* "connected" handling already done */
+static bool ap_started = false;       /* connection set up and thread running */
 static bool ap_failed = false;        /* setup failed; don't keep retrying */
 
-/* Handlers registered by the game-side glue (ap-game.c). */
+/* Game-side handlers (set once before the thread starts; read on game thread). */
 static void (*ap_check_handler)(const char *name) = NULL;
 static void (*ap_item_handler)(const char *item_name, uint64_t index) = NULL;
 static void (*ap_connect_handler)(void) = NULL;
 static void (*ap_deathlink_handler)(void) = NULL;
 
-/* slot_data: artifacts-as-checks mode (set from the server on connect). */
-static bool ap_opt_artifacts_as_checks = false;
+/* slot_data: artifacts-as-checks mode (written on service thread, read on game). */
+static volatile bool ap_opt_artifacts_as_checks = false;
 
-/*
- * Stable 0-based index of each received item.  APCc invokes the item-clear
- * callback (on connect, before replaying items) and then delivers every item in
- * order, so resetting this counter on clear and bumping it per item yields the
- * same index for the same item on every reconnect.
- */
-static uint64_t ap_item_seq = 0;
+/* --- Threading ------------------------------------------------------------- */
 
-/*
- * Checked-location ids can arrive (as a replay) before the data package is
- * loaded, so their names aren't resolvable yet.  Park them here and drain once
- * the data package is synced.
- */
+static GThread *ap_thread = NULL;
+static volatile gint ap_thread_run = 0;
+static GAsyncQueue *ap_in_q = NULL;   /* service -> game */
+static GAsyncQueue *ap_out_q = NULL;  /* game -> service */
+
+enum ap_in_type { AP_IN_ITEM, AP_IN_CHECK, AP_IN_DEATHLINK, AP_IN_CONNECTED };
+struct ap_in_event {
+	enum ap_in_type type;
+	char *name;       /* heap copy, freed by the game thread */
+	guint64 index;
+};
+
+enum ap_out_type { AP_OUT_CHECK, AP_OUT_DEATHLINK };
+struct ap_out_event {
+	enum ap_out_type type;
+	char *name;       /* heap copy, freed by the service thread */
+};
+
+/* Service-thread-only state. */
+static uint64_t ap_item_seq = 0;      /* stable 0-based index of received items */
+static bool ap_announced = false;     /* "connected" event already emitted */
 #define AP_PENDING_MAX 1024
-static uint64_t ap_pending_checks[AP_PENDING_MAX];
+static uint64_t ap_pending_checks[AP_PENDING_MAX];  /* checks awaiting data sync */
 static int ap_pending_count = 0;
 
-/* --- Internal helpers ------------------------------------------------------ */
+/* --- Service thread: produce incoming events ------------------------------- */
 
-/** Resolve a checked location id to its name and hand it to the game. */
-static void ap_deliver_check(uint64_t loc_id)
+static void ap_push_in(enum ap_in_type type, const char *name, guint64 index)
 {
-	char *name = AP_GetLocationName(loc_id);
-	if (ap_check_handler && name) ap_check_handler(name);
+	struct ap_in_event *e = g_new0(struct ap_in_event, 1);
+	e->type = type;
+	e->name = name ? g_strdup(name) : NULL;
+	e->index = index;
+	g_async_queue_push(ap_in_q, e);
 }
 
-static void ap_pending_push(uint64_t loc_id)
-{
-	if (ap_pending_count < AP_PENDING_MAX)
-		ap_pending_checks[ap_pending_count++] = loc_id;
-	else
-		ap_deliver_check(loc_id);   /* overflow: best effort, deliver now */
-}
-
-static void ap_pending_drain(void)
-{
-	int i;
-	for (i = 0; i < ap_pending_count; i++)
-		ap_deliver_check(ap_pending_checks[i]);
-	ap_pending_count = 0;
-}
-
-/* --- Required APCc callbacks ----------------------------------------------- */
+/* --- Required APCc callbacks (all run on the service thread) ---------------- */
 
 static void ap_cb_item_clear(void)
 {
@@ -106,10 +111,31 @@ static void ap_cb_item_recv(uint64_t item_id, int sending_player, bool notify)
 	(void)notify;       /* deliver replays too: a fresh character's home is empty */
 
 	name = AP_GetItemName(item_id);
-	if (ap_item_handler && name) ap_item_handler(name, ap_item_seq);
+	ap_push_in(AP_IN_ITEM, name, ap_item_seq);
 
-	/* Advance even with no handler/name so indices stay aligned with AP. */
+	/* Advance even with no name so indices stay aligned with AP. */
 	ap_item_seq++;
+}
+
+static void ap_deliver_check_now(uint64_t loc_id)
+{
+	char *name = AP_GetLocationName(loc_id);
+	if (name) ap_push_in(AP_IN_CHECK, name, 0);
+}
+
+static void ap_cb_location_checked(uint64_t loc_id)
+{
+	/*
+	 * If the data package is loaded we can resolve the name now; otherwise
+	 * defer (the checked-location replay arrives with Connected, before the
+	 * data package on a first connect).
+	 */
+	if (AP_GetDataPackageStatus() == Synced)
+		ap_deliver_check_now(loc_id);
+	else if (ap_pending_count < AP_PENDING_MAX)
+		ap_pending_checks[ap_pending_count++] = loc_id;
+	else
+		ap_deliver_check_now(loc_id);   /* overflow: best effort */
 }
 
 /* slot_data int callback.  APCc passes a pointer to the value (see APCc.c). */
@@ -118,24 +144,60 @@ static void ap_cb_slotdata_artifacts(uint64_t *val)
 	ap_opt_artifacts_as_checks = (val && *val != 0);
 }
 
-static void ap_cb_location_checked(uint64_t loc_id)
+/* --- Service thread: consume outgoing events + run the event loop ---------- */
+
+static void ap_drain_out(void)
 {
-	/*
-	 * If the data package is loaded we can resolve the name now; otherwise
-	 * defer (this happens for the checked-location replay that arrives with
-	 * the Connected packet, before the data package on a first connect).
-	 */
-	if (AP_GetDataPackageStatus() == Synced)
-		ap_deliver_check(loc_id);
-	else
-		ap_pending_push(loc_id);
+	struct ap_out_event *o;
+
+	while ((o = g_async_queue_try_pop(ap_out_q)) != NULL) {
+		if (o->type == AP_OUT_CHECK && o->name) {
+			int64_t id = AP_GetLocationIdByName(o->name);
+			if (id >= 0) AP_SendItem((uint64_t)id);
+		} else if (o->type == AP_OUT_DEATHLINK) {
+			AP_DeathLinkSend();
+		}
+		g_free(o->name);
+		g_free(o);
+	}
+}
+
+static gpointer ap_thread_fn(gpointer data)
+{
+	(void)data;
+
+	while (g_atomic_int_get(&ap_thread_run)) {
+		ap_drain_out();
+
+		/* Blocks on socket I/O; that is fine on this dedicated thread. */
+		AP_WebService();
+
+		/* Flush checks deferred until the data package arrived. */
+		if (ap_pending_count > 0 && AP_GetDataPackageStatus() == Synced) {
+			int i;
+			for (i = 0; i < ap_pending_count; i++)
+				ap_deliver_check_now(ap_pending_checks[i]);
+			ap_pending_count = 0;
+		}
+
+		if (!ap_announced && AP_GetConnectionStatus() == Authenticated) {
+			ap_announced = true;
+			ap_push_in(AP_IN_CONNECTED, NULL, 0);
+		}
+
+		if (AP_DeathLinkPending()) {
+			AP_DeathLinkClear();
+			ap_push_in(AP_IN_DEATHLINK, NULL, 0);
+		}
+	}
+
+	return NULL;
 }
 
 /* --- Helpers --------------------------------------------------------------- */
 
 /**
  * Split "host:port" (e.g. "archipelago.gg:32000") into host and port.
- *
  * \return true on success.
  */
 static bool ap_parse_server(const char *src, char *host, size_t hostlen,
@@ -156,22 +218,19 @@ static bool ap_parse_server(const char *src, char *host, size_t hostlen,
 }
 
 /**
- * Initialise the APCc client and begin connecting using the server/slotname
- * captured during character birth.
+ * Initialise the APCc client, then start the service thread.
  */
 static void ap_begin(const char *server, const char *slotname)
 {
 	int port = 0;
 
 	if (!server || server[0] == '\0') {
-		/* No AP server configured: Archipelago is simply disabled. */
-		ap_failed = true;
+		ap_failed = true;       /* Archipelago disabled: no server configured */
 		return;
 	}
 
 	if (!ap_parse_server(server, ap_host, sizeof(ap_host), &port)) {
-		msg("AP: could not parse server '%s' (expected host:port).",
-			server);
+		msg("AP: could not parse server '%s' (expected host:port).", server);
 		ap_failed = true;
 		return;
 	}
@@ -180,18 +239,13 @@ static void ap_begin(const char *server, const char *slotname)
 	ap_password[0] = '\0';
 
 	/*
-	 * AP_Init() allocates the internal callback registries (the slot-data
-	 * string list and hash tables), so it MUST run before any registration --
-	 * AP_RegisterSlotDataIntCallback() in particular dereferences those and
-	 * would segfault otherwise.
+	 * AP_Init() allocates APCc's internal callback registries, so it must run
+	 * before any registration (AP_RegisterSlotDataIntCallback in particular
+	 * dereferences them).  It also leaves client_version NULL and dereferences
+	 * it when building the Connect packet, so set that here too.
 	 */
 	AP_Init(ap_host, port, AP_GAME_NAME, ap_slot, ap_password);
 
-	/*
-	 * Report the Archipelago network protocol version we target.  APCc leaves
-	 * client_version NULL until set, and dereferences it when building the
-	 * Connect packet, so this must happen before connecting.
-	 */
 	{
 		struct AP_NetworkVersion ver = { 0, 6, 4 };
 		AP_SetClientVersion(&ver);
@@ -200,48 +254,57 @@ static void ap_begin(const char *server, const char *slotname)
 	AP_SetItemClearCallback(ap_cb_item_clear);
 	AP_SetItemRecvCallback(ap_cb_item_recv);
 	AP_SetLocationCheckedCallback(ap_cb_location_checked);
-
-	/* DeathLink: advertise support; the server enables it via slot_data. */
 	AP_SetDeathLinkSupported(true);
 
-	/*
-	 * Watch for the artifacts-as-checks option in slot_data.  APCc actually
-	 * invokes int slot-data callbacks with a uint64_t* (its header's by-value
-	 * declaration is inaccurate), so register with a matching cast.
-	 */
+	/* APCc invokes int slot-data callbacks with a uint64_t* (its header's
+	 * by-value declaration is inaccurate), so register with a matching cast. */
 	AP_RegisterSlotDataIntCallback("artifacts_as_checks",
 		(void (*)(uint64_t))ap_cb_slotdata_artifacts);
 
 	AP_Start();
 
+	ap_in_q = g_async_queue_new();
+	ap_out_q = g_async_queue_new();
+	g_atomic_int_set(&ap_thread_run, 1);
+	ap_thread = g_thread_new("ap-service", ap_thread_fn, NULL);
+
 	ap_started = true;
 	msg("AP: connecting to %s:%d as '%s'...", ap_host, port, ap_slot);
 }
 
-/* --- Public API ------------------------------------------------------------ */
+/* --- Public API (all called on the game thread) ---------------------------- */
 
 void ap_service(const char *server, const char *slotname)
 {
+	struct ap_in_event *e;
+
 	if (ap_failed) return;
-	if (!ap_started) ap_begin(server, slotname);
-	if (!ap_started) return;
-
-	AP_WebService();
-
-	/* Once the data package is up, flush any checks deferred during connect. */
-	if (ap_pending_count > 0 && AP_GetDataPackageStatus() == Synced)
-		ap_pending_drain();
-
-	/* Deliver an incoming DeathLink to the game. */
-	if (AP_DeathLinkPending()) {
-		AP_DeathLinkClear();
-		if (ap_deathlink_handler) ap_deathlink_handler();
+	if (!ap_started) {
+		ap_begin(server, slotname);
+		if (!ap_started) return;
 	}
 
-	if (!ap_announced && AP_GetConnectionStatus() == Authenticated) {
-		ap_announced = true;
-		msg("AP: connected to Archipelago as '%s'.", ap_slot);
-		if (ap_connect_handler) ap_connect_handler();
+	/* Apply everything the service thread has queued for us. */
+	while ((e = g_async_queue_try_pop(ap_in_q)) != NULL) {
+		switch (e->type) {
+		case AP_IN_ITEM:
+			if (ap_item_handler && e->name)
+				ap_item_handler(e->name, e->index);
+			break;
+		case AP_IN_CHECK:
+			if (ap_check_handler && e->name)
+				ap_check_handler(e->name);
+			break;
+		case AP_IN_CONNECTED:
+			msg("AP: connected to Archipelago as '%s'.", ap_slot);
+			if (ap_connect_handler) ap_connect_handler();
+			break;
+		case AP_IN_DEATHLINK:
+			if (ap_deathlink_handler) ap_deathlink_handler();
+			break;
+		}
+		g_free(e->name);
+		g_free(e);
 	}
 }
 
@@ -252,26 +315,50 @@ bool ap_is_connected(void)
 
 void ap_shutdown(void)
 {
-	if (ap_started) {
-		AP_Shutdown();
-		ap_started = false;
-		ap_announced = false;
+	if (!ap_started) return;
+
+	/* Stop and join the service thread. */
+	g_atomic_int_set(&ap_thread_run, 0);
+	AP_WakeService();
+	if (ap_thread) {
+		g_thread_join(ap_thread);
+		ap_thread = NULL;
 	}
+
+	AP_Shutdown();
+	ap_started = false;
+	ap_announced = false;
 }
 
 void ap_send_check(const char *name)
 {
-	int64_t loc;
+	struct ap_out_event *o;
 
 	if (!ap_started || !name) return;
-	loc = AP_GetLocationIdByName(name);
-	if (loc < 0) return;            /* unknown location or data package not ready */
-	AP_SendItem((uint64_t)loc);
+
+	o = g_new0(struct ap_out_event, 1);
+	o->type = AP_OUT_CHECK;
+	o->name = g_strdup(name);
+	g_async_queue_push(ap_out_q, o);
+	AP_WakeService();
 }
 
-bool ap_location_known(const char *name)
+void ap_send_deathlink(void)
 {
-	return ap_started && name && AP_GetLocationIdByName(name) >= 0;
+	struct ap_out_event *o;
+
+	if (!ap_started) return;
+
+	o = g_new0(struct ap_out_event, 1);
+	o->type = AP_OUT_DEATHLINK;
+	o->name = NULL;
+	g_async_queue_push(ap_out_q, o);
+	AP_WakeService();
+}
+
+bool ap_artifacts_as_checks(void)
+{
+	return ap_opt_artifacts_as_checks;
 }
 
 void ap_set_check_handler(void (*fn)(const char *name))
@@ -284,19 +371,9 @@ void ap_set_item_handler(void (*fn)(const char *item_name, uint64_t index))
 	ap_item_handler = fn;
 }
 
-bool ap_artifacts_as_checks(void)
-{
-	return ap_opt_artifacts_as_checks;
-}
-
 void ap_set_connect_handler(void (*fn)(void))
 {
 	ap_connect_handler = fn;
-}
-
-void ap_send_deathlink(void)
-{
-	if (ap_is_connected()) AP_DeathLinkSend();
 }
 
 void ap_set_deathlink_handler(void (*fn)(void))

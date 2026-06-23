@@ -971,6 +971,16 @@ bool AP_IsInit() {
     return init;
 }
 
+/*
+ * Local addition (not upstream): wake a blocked lws_service() running on another
+ * thread.  lws_cancel_service() is the one libwebsockets entry point that is safe
+ * to call cross-thread, so a host that services AP_WebService() on a dedicated
+ * thread can call this to make it return promptly (e.g. after queueing a send).
+ */
+void AP_WakeService() {
+    if (context) lws_cancel_service(context);
+}
+
 void AP_WebService() {
     /* Connect if we are not connected to the server. */
     if (!web_socket)

@@ -64,13 +64,6 @@ void ap_set_check_handler(void (*fn)(const char *name));
 void ap_set_item_handler(void (*fn)(const char *item_name, uint64_t index));
 
 /**
- * \return true if \p name is a location the connected game knows about (its data
- * package is loaded and contains it).  Lets the game pick among candidate names
- * (e.g. artifact naming variants) before sending a check.
- */
-bool ap_location_known(const char *name);
-
-/**
  * \return true if the server's slot_data enabled the "artifacts as checks" mode
  * (slot_data key "artifacts_as_checks"): artifacts become AP location checks and
  * the real artifacts are granted as items, instead of spawning normally.

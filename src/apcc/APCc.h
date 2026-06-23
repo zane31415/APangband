@@ -297,3 +297,5 @@ void AP_SetNotify_Type(char* key, AP_DataType type);
 
 int AP_WebsocketSulInit(uint32_t timeout_ms);
 void service_loop();
+/* Local addition: wake a blocked AP_WebService()/lws_service() cross-thread. */
+void AP_WakeService();
