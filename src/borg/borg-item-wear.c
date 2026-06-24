@@ -1212,6 +1212,23 @@ static bool borg_one_step_wearing_best(int skip)
 #define BORG_BEST_NONE 0xFFFF
 
 /*
+ * Hard budget on the borg_best_stuff combinatorial search.
+ *
+ * borg_best_stuff_aux tries every fitting item (pack + the WHOLE home) in every
+ * equipment slot and recurses, so the search tree is roughly (items-per-slot) ^
+ * (equipment slots).  With the AP fork's 256-slot home a populated house makes
+ * that astronomically large and each leaf runs borg_notice()+borg_power(), so
+ * the game freezes ("not responding") the moment the borg walks into a full
+ * home.  Cap the number of evaluated combinations: the borg keeps the best set
+ * found within the budget instead of hanging.  Each leaf runs
+ * borg_notice()+borg_power(), so this also bounds the worst-case pause; 10k is
+ * well above what the original 24-slot home ever reached, so normal homes are
+ * unaffected while a packed AP home degrades to "good enough", not frozen.
+ */
+#define BORG_BEST_STUFF_MAX_EVALS 10000
+static int32_t borg_best_stuff_evals;
+
+/*
  * Helper function (see below)
  */
 static void borg_best_stuff_aux(
@@ -1221,12 +1238,19 @@ static void borg_best_stuff_aux(
 
     int slot;
 
+    /* Stop descending once the search budget is spent (populated-home guard) */
+    if (borg_best_stuff_evals > BORG_BEST_STUFF_MAX_EVALS)
+        return;
+
     /* Extract the slot */
     slot = borg_best_stuff_order(n);
 
     /* All done */
     if (slot == 255) {
         int32_t p;
+
+        /* Count this combination against the search budget */
+        borg_best_stuff_evals++;
 
         /* Examine */
         borg_notice(true);
@@ -1260,6 +1284,11 @@ static void borg_best_stuff_aux(
                          : z_info->pack_size);
          i++) {
         borg_item *item;
+
+        /* Stop once the search budget is spent (populated-home guard) */
+        if (borg_best_stuff_evals > BORG_BEST_STUFF_MAX_EVALS)
+            break;
+
         if (i < z_info->pack_size)
             item = &borg_items[i];
         else
@@ -1375,8 +1404,17 @@ bool borg_best_stuff(void)
     /* Evaluate the inventory */
     value = borg.power;
 
+    /* Reset the search budget (guards against a populated-home freeze) */
+    borg_best_stuff_evals = 0;
+
     /* Determine the best possible equipment */
     (void)borg_best_stuff_aux(0, test, best, &value);
+
+    /* Note if the search was truncated, so a freeze here is diagnosable */
+    if (borg_best_stuff_evals > BORG_BEST_STUFF_MAX_EVALS)
+        borg_note(format("# borg_best_stuff: search capped at %d combinations "
+                         "(home too large to fully optimize).",
+            BORG_BEST_STUFF_MAX_EVALS));
 
     /* Restore bonuses */
     borg_notice(true);
