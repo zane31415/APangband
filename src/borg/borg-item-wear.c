@@ -1201,10 +1201,21 @@ static bool borg_one_step_wearing_best(int skip)
 }
 
 /*
+ * Sentinel for the borg_best_stuff test/best lists meaning "no item chosen
+ * for this equipment slot".  Must be outside every real encoding: inventory
+ * indices (< 100), equipment slot indices (< 100), and home items (home slot
+ * + 100, which with the AP fork's 256-slot home reaches ~355).  255 -- the old
+ * value -- collides with home slot 155, so the lists are uint16_t and this is
+ * 0xFFFF.  (NB: borg_best_stuff_order() has its own, unrelated 255 "done"
+ * sentinel for slot ordering; that one is left alone.)
+ */
+#define BORG_BEST_NONE 0xFFFF
+
+/*
  * Helper function (see below)
  */
 static void borg_best_stuff_aux(
-    int n, uint8_t *test, uint8_t *best, int32_t *vp)
+    int n, uint16_t *test, uint16_t *best, int32_t *vp)
 {
     int i;
 
@@ -1334,8 +1345,8 @@ bool borg_best_stuff(void)
 
     int i;
 
-    uint8_t *test;
-    uint8_t *best;
+    uint16_t *test;
+    uint16_t *best;
 
     /* only do this at home */
     if (shop_num != BORG_HOME)
@@ -1353,12 +1364,12 @@ bool borg_best_stuff(void)
     if (!borg.goal.do_best)
         return false;
 
-    best = mem_alloc(sizeof(uint8_t) * z_info->equip_slots_max);
-    test = mem_alloc(sizeof(uint8_t) * z_info->equip_slots_max);
+    best = mem_alloc(sizeof(*best) * z_info->equip_slots_max);
+    test = mem_alloc(sizeof(*test) * z_info->equip_slots_max);
     /* Hack -- Initialize */
     for (k = 0; k < z_info->equip_slots_max; k++) {
         /* Initialize */
-        best[k] = test[k] = 255;
+        best[k] = test[k] = BORG_BEST_NONE;
     }
 
     /* Evaluate the inventory */
@@ -1382,7 +1393,7 @@ bool borg_best_stuff(void)
         i = best[k];
 
         /* Ignore non-changes */
-        if (i == borg_best_stuff_order(k) || 255 == i)
+        if (i == borg_best_stuff_order(k) || BORG_BEST_NONE == i)
             continue;
 
         found = true;
@@ -1409,7 +1420,10 @@ bool borg_best_stuff(void)
     if (borg_cfg[BORG_VERBOSE]) {
         if (found) {
             for (i = 0; i < z_info->equip_slots_max; i++) {
-                if (best[i] > 100) {
+                /* skip slots with no chosen item */
+                if (best[i] == BORG_BEST_NONE)
+                    continue;
+                if (best[i] >= 100) {
                     borg_note(format("new best: %s",
                         borg_shops[BORG_HOME].ware[best[i] - 100].desc));
                 } else {

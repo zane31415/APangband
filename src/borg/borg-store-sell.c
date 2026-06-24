@@ -46,8 +46,16 @@ int sold_item_store[10];
 int sold_item_num = -1;
 int sold_item_nxt = 0;
 
-uint8_t *test_item;
-uint8_t *best_item;
+/*
+ * Home-optimization scratch arrays.  Each entry encodes one of: a home slot
+ * left unchanged (value == its own index), an inventory item moved into that
+ * slot (value == pack index + store_inven_max), or "empty".  With the AP
+ * fork's 256-slot home (store:inven-max in constants.txt) the pack-index
+ * offset reaches ~279, so these MUST be wider than uint8_t or the encoding
+ * wraps and the borg chases a garbage (blank-desc) item into the home forever.
+ */
+uint16_t *test_item;
+uint16_t *best_item;
 
 /*
  * Determine if an item can "absorb" a second item
@@ -531,8 +539,8 @@ bool borg_think_home_sell_useful(int32_t *best_home_power)
     int p, i = -1;
 
     /* clear out our initial best/test objects */
-    memset(test_item, 0, sizeof(z_info->store_inven_max * sizeof(uint8_t)));
-    memset(best_item, 0, sizeof(z_info->store_inven_max * sizeof(uint8_t)));
+    memset(test_item, 0, z_info->store_inven_max * sizeof(*test_item));
+    memset(best_item, 0, z_info->store_inven_max * sizeof(*best_item));
 
     /* Hack -- the home is full */
     /* and pack is full */
@@ -1268,8 +1276,8 @@ int borg_count_sell(void)
 
 void borg_init_store_sell(void)
 {
-    test_item = mem_zalloc(z_info->store_inven_max * sizeof(uint8_t));
-    best_item = mem_zalloc(z_info->store_inven_max * sizeof(uint8_t));
+    test_item = mem_zalloc(z_info->store_inven_max * sizeof(*test_item));
+    best_item = mem_zalloc(z_info->store_inven_max * sizeof(*best_item));
 }
 
 void borg_free_store_sell(void)
