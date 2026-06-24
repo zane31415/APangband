@@ -26,6 +26,11 @@
 #ifdef ALLOW_BORG
 
 /*
+ * Append a diagnostic line to borg-stutter.txt (temporary stutter logging)
+ */
+extern void borg_log_line(const char *what);
+
+/*
  * write a death to borg-log.txt
  */
 extern void borg_log_death(void);

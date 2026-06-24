@@ -33,6 +33,7 @@
 #include "borg-item-activation.h"
 #include "borg-item-use.h"
 #include "borg-item-val.h"
+#include "borg-log.h"
 #include "borg-magic.h"
 #include "borg-projection.h"
 #include "borg-trait.h"
@@ -87,6 +88,183 @@ struct borg_track track_door;
  * Track closed doors which started closed
  */
 struct borg_track track_closed;
+
+/*
+ * Detect a positional oscillation -- the borg "shaking" without getting
+ * anywhere.  track_step records the borg's grid each think-cycle (newest at
+ * num-1), so we examine a recent window: if the borg covered only a SMALL set
+ * of distinct grids across many steps, it is shuffling in place rather than
+ * travelling.  This catches both a two-grid bounce AND a back-and-forth along a
+ * corridor (A-B-C-D-C-B-A...), which a strict two-grid test misses.  One
+ * distinct grid (standing still to rest/fight/dig) is intentional and is NOT
+ * flagged; more than BORG_OSC_MAXGRIDS distinct means it is genuinely moving.
+ *
+ * If it is oscillating and cy/cx are non-NULL, they receive a stable anchor
+ * grid for the shuffle (the lexicographically smallest grid in the window), so
+ * a caller can attribute every episode of one corridor shuffle to the same
+ * grid instead of smearing the count across the whole corridor.
+ */
+#define BORG_OSC_WINDOW   20 /* recent steps to examine */
+#define BORG_OSC_MAXGRIDS 8  /* up to this many distinct grids = stuck shuffle */
+
+bool borg_oscillating_at(int *cy, int *cx)
+{
+    int n = track_step.num;
+    int i, distinct = 0;
+    int gx[BORG_OSC_MAXGRIDS], gy[BORG_OSC_MAXGRIDS];
+    int anchor = 0;
+
+    /* need a full window of recorded steps */
+    if (n < BORG_OSC_WINDOW)
+        return false;
+
+    for (i = n - BORG_OSC_WINDOW; i < n; i++) {
+        int  j;
+        bool seen = false;
+        for (j = 0; j < distinct; j++) {
+            if (gx[j] == track_step.x[i] && gy[j] == track_step.y[i]) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) {
+            /* too many distinct grids -> travelling, not stuck */
+            if (distinct == BORG_OSC_MAXGRIDS)
+                return false;
+            gx[distinct] = track_step.x[i];
+            gy[distinct] = track_step.y[i];
+            /* track the lexicographically smallest grid as the anchor */
+            if (gy[distinct] < gy[anchor]
+                || (gy[distinct] == gy[anchor] && gx[distinct] < gx[anchor]))
+                anchor = distinct;
+            distinct++;
+        }
+    }
+
+    /* a small set of grids revisited across a long window = stuck shuffle */
+    if (distinct < 2)
+        return false;
+
+    if (cy)
+        *cy = gy[anchor];
+    if (cx)
+        *cx = gx[anchor];
+    return true;
+}
+
+bool borg_oscillating(void) { return borg_oscillating_at(NULL, NULL); }
+
+/*
+ * Temporary "tabu" grids: spots where the borg has repeatedly been caught
+ * oscillating.  A single back-and-forth is often legitimate (kiting, jostling
+ * for position), so we only act once a grid has tripped the oscillation
+ * detector BORG_TABU_THRESHOLD separate times; then the flow planner avoids
+ * that grid for BORG_TABU_TURNS so the borg routes elsewhere instead of being
+ * magnetised back to the same trap.  Grids are level-specific, so the table is
+ * reset on each new level (borg_tabu_reset).
+ */
+#define BORG_TABU_MAX       12  /* grids tracked at once */
+#define BORG_TABU_THRESHOLD 5   /* oscillation episodes before a grid is tabu */
+#define BORG_TABU_TURNS     50  /* borg_t a grid stays tabu once tripped */
+#define BORG_TABU_FORGET    200 /* drop a hotspot unseen this long (borg_t) */
+
+struct borg_tabu_grid {
+    int     y, x;
+    int     count;  /* oscillation episodes recorded at this grid */
+    int16_t last_t; /* borg_t of the most recent episode */
+    int16_t until;  /* borg_t until which the grid is avoided (0 = not tabu) */
+};
+
+static struct borg_tabu_grid borg_tabu[BORG_TABU_MAX];
+static bool                   borg_tabu_any; /* has any grid been tabu'd here? */
+
+/*
+ * Forget all tabu/hotspot grids.  Grids are level-specific, so this is called
+ * when the borg changes level.
+ */
+void borg_tabu_reset(void)
+{
+    memset(borg_tabu, 0, sizeof(borg_tabu));
+    borg_tabu_any = false;
+}
+
+/*
+ * Record that the borg is oscillating at (y, x).  Called once per oscillation
+ * episode (the caller debounces).  Once a grid reaches BORG_TABU_THRESHOLD
+ * episodes it becomes tabu for BORG_TABU_TURNS.
+ */
+void borg_tabu_note_oscillation(int y, int x)
+{
+    int i, slot = -1, oldest = 0;
+
+    /* Find this grid's hotspot, an empty slot, or the stalest slot to reuse */
+    for (i = 0; i < BORG_TABU_MAX; i++) {
+        if (borg_tabu[i].count && borg_tabu[i].y == y && borg_tabu[i].x == x) {
+            slot = i;
+            break;
+        }
+        if (borg_tabu[i].count == 0) {
+            if (slot < 0)
+                slot = i;
+        } else if (borg_tabu[i].last_t < borg_tabu[oldest].last_t) {
+            oldest = i;
+        }
+    }
+    if (slot < 0)
+        slot = oldest; /* all slots in use -- evict the stalest */
+
+    /* Reusing a different/stale grid: start its tally over */
+    if (borg_tabu[slot].y != y || borg_tabu[slot].x != x
+        || borg_tabu[slot].count == 0
+        || borg_t - borg_tabu[slot].last_t > BORG_TABU_FORGET) {
+        borg_tabu[slot].y     = y;
+        borg_tabu[slot].x     = x;
+        borg_tabu[slot].count = 0;
+        borg_tabu[slot].until = 0;
+    }
+
+    borg_tabu[slot].count++;
+    borg_tabu[slot].last_t = borg_t;
+
+    /* Tripped the threshold -- avoid this grid for a while */
+    if (borg_tabu[slot].count >= BORG_TABU_THRESHOLD) {
+        borg_tabu[slot].until = borg_t + BORG_TABU_TURNS;
+        borg_tabu[slot].count = 0; /* must re-earn the next tabu */
+        borg_tabu_any         = true;
+        borg_note(format(
+            "# TABU: avoiding stuck grid (%d,%d) for %d turns", y, x,
+            BORG_TABU_TURNS));
+        borg_log_line(format("# TABU: avoiding stuck grid (%d,%d)", y, x));
+    }
+}
+
+/*
+ * Is (y, x) a grid the borg is currently avoiding because it kept getting
+ * stuck there?  The borg's own grid is never tabu -- it must always be able to
+ * flow away from where it stands.
+ */
+bool borg_grid_is_tabu(int y, int x)
+{
+    int i;
+
+    if (!borg_tabu_any)
+        return false;
+    if (y == borg.c.y && x == borg.c.x)
+        return false;
+
+    for (i = 0; i < BORG_TABU_MAX; i++) {
+        if (!borg_tabu[i].until)
+            continue;
+        /* Lazily expire */
+        if (borg_t >= borg_tabu[i].until) {
+            borg_tabu[i].until = 0;
+            continue;
+        }
+        if (borg_tabu[i].y == y && borg_tabu[i].x == x)
+            return true;
+    }
+    return false;
+}
 
 bool borg_desperate = false;
 
@@ -436,6 +614,10 @@ void borg_flow_spread(int depth, bool optimize, bool avoid, bool tunneling,
             if (borg_data_icky->data[y][x])
                 continue;
 
+            /* Avoid grids we keep getting stuck oscillating at (temporary) */
+            if (borg_grid_is_tabu(y, x))
+                continue;
+
             /* Analyze every grid once */
             if (!borg_data_know->data[y][x]) {
                 int p;
@@ -517,6 +699,10 @@ void borg_flow_enqueue_grid(int y, int x)
 
     /* Avoid icky grids */
     if (borg_data_icky->data[y][x])
+        return;
+
+    /* Do not target grids we keep getting stuck oscillating at (temporary) */
+    if (borg_grid_is_tabu(y, x))
         return;
 
     /* Unknown */

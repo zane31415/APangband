@@ -42,6 +42,27 @@
 #include "borg.h"
 
 /*
+ * Append a single diagnostic line to borg-stutter.txt.
+ *
+ * TEMPORARY instrumentation for the oscillation/stutter investigation: it
+ * gives a collectable on-disk record, since borg_note() otherwise only reaches
+ * the (fast, unreadable) message window.  Remove once the stutters are
+ * characterised and the loop-breaking fix lands.
+ */
+void borg_log_line(const char *what)
+{
+    char      buf[1024];
+    ang_file *f;
+
+    path_build(buf, sizeof(buf), ANGBAND_DIR_ARCHIVE, "borg-stutter.txt");
+    f = file_open(buf, MODE_APPEND, FTYPE_TEXT);
+    if (!f)
+        return;
+    file_putf(f, "%s\n", what);
+    file_close(f);
+}
+
+/*
  * write a death to borg-log.txt
  */
 void borg_log_death(void)

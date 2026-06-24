@@ -170,6 +170,21 @@ extern bool borg_flow_old(int why);
 extern void borg_init_track(struct borg_track *track, int size);
 extern void borg_free_track(struct borg_track *track);
 
+/*
+ * Detect a positional oscillation -- the borg "shaking" without getting
+ * anywhere (a two-grid bounce or a back-and-forth along a corridor).
+ * borg_oscillating_at() also reports a stable anchor grid for the shuffle.
+ */
+extern bool borg_oscillating_at(int *cy, int *cx);
+extern bool borg_oscillating(void);
+
+/*
+ * Temporary "tabu" grids the borg avoids after it kept getting stuck there.
+ */
+extern void borg_tabu_reset(void);
+extern void borg_tabu_note_oscillation(int y, int x);
+extern bool borg_grid_is_tabu(int y, int x);
+
 extern void borg_init_flow(void);
 extern void borg_free_flow(void);
 

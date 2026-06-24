@@ -41,6 +41,7 @@
 #include "borg-io.h"
 #include "borg-item-wear.h"
 #include "borg-junk.h"
+#include "borg-log.h"
 #include "borg-messages.h"
 #include "borg-prepared.h"
 #include "borg-projection.h"
@@ -2021,6 +2022,9 @@ void borg_update(void)
         /* reset our panel clock */
         borg.time_this_panel = 1;
 
+        /* forget tabu (stuck) grids -- they are specific to the old level */
+        borg_tabu_reset();
+
         /* reset our vault/unique check */
         vault_on_level    = false;
         unique_on_level   = 0;
@@ -2468,6 +2472,38 @@ void borg_update(void)
     track_step.x[track_step.num] = borg.c.x;
     track_step.y[track_step.num] = borg.c.y;
     track_step.num++;
+
+    /*
+     * Diagnose stutters: log when the borg is shuffling back and forth between
+     * two grids.  Rate-limited to once per oscillation episode so it does not
+     * spam the message log.  Logging only -- behaviour is unchanged.  goal.type
+     * tells us which goal keeps re-deciding; that is what we will target next.
+     */
+    {
+        static int16_t borg_osc_last_t = -100;
+        int            osc_y = borg.c.y, osc_x = borg.c.x;
+        if (borg_oscillating_at(&osc_y, &osc_x)) {
+            if (borg_t - borg_osc_last_t > 8) {
+                char osc[160];
+                strnfmt(osc, sizeof(osc),
+                    "# STUTTER: oscillating near (%d,%d) at (%d,%d) goal.type=%d "
+                    "fleeing=%d twitch=%d dlev=%d clev=%d turn=%d",
+                    osc_y, osc_x, borg.c.y, borg.c.x, borg.goal.type,
+                    borg.goal.fleeing, borg.times_twitch, borg.trait[BI_CDEPTH],
+                    borg.trait[BI_CLEVEL], borg_t);
+                borg_note(osc);
+                borg_log_line(osc);
+
+                /*
+                 * One debounced episode -- feed the tabu tracker the shuffle's
+                 * stable anchor grid, so a long corridor shuffle still trips the
+                 * threshold instead of smearing the count across every grid.
+                 */
+                borg_tabu_note_oscillation(osc_y, osc_x);
+            }
+            borg_osc_last_t = borg_t;
+        }
+    }
 
     /* Hack - Clean the steps every so often */
     if (track_step.num >= 75) {
