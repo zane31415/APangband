@@ -17,6 +17,7 @@
  */
 
 #include "angband.h"
+#include "ap-game.h"
 #include "cmd-core.h"
 #include "cmds.h"
 #include "game-event.h"
@@ -1341,6 +1342,17 @@ void do_cmd_accept_character(struct command *cmd)
 	prev.history = NULL;
 	string_free(quickstart_prev.history);
 	quickstart_prev.history = NULL;
+
+	/*
+	 * Archipelago: a freshly-born character (new game, or retire -> new run in
+	 * the same session) must get the item replay.  Reset the per-character mark
+	 * and drop any existing connection so the next ap_service() reconnects with
+	 * this character's server/slotname and re-runs the replay (restocking the
+	 * home, re-applying boons).  A no-op if AP isn't connected (first birth of
+	 * the session just connects normally); loads don't come through here, so an
+	 * existing character keeps its saved mark and isn't re-stocked.
+	 */
+	ap_game_reset_for_new_life();
 
 	/* Now we're really done.. */
 	event_signal(EVENT_LEAVE_BIRTH);

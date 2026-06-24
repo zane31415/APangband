@@ -1237,19 +1237,29 @@ static void mon_summary(int gid, const int *item_list, int n, int top,
 	int i;
 	int kills = 0;
 
-	/* Access the race */
-	for (i = 0; i < n; i++) {
-		int oid = default_join[item_list[i+top]].oid;
-		kills += l_list[oid].pkills;
-	}
-
 	/* Different display for the first item if we've got uniques to show */
 	if (gid == 0 &&
 		rf_has((&r_info[default_join[item_list[0]].oid])->flags, RF_UNIQUE)) {
+		/*
+		 * "Slain" for uniques counts the dead, not just our own kills: an
+		 * Archipelago replay marks previously-killed uniques dead (max_num == 0)
+		 * for a fresh character that never killed them itself, matching the
+		 * per-row "dead/alive" label above.
+		 */
+		for (i = 0; i < n; i++) {
+			int oid = default_join[item_list[i+top]].oid;
+			if (r_info[oid].max_num == 0) kills++;
+		}
+
 		c_prt(COLOUR_L_BLUE, format("%d known uniques, %d slain.", n, kills),
 					row, col);
 	} else {
 		int tkills = 0;
+
+		for (i = 0; i < n; i++) {
+			int oid = default_join[item_list[i+top]].oid;
+			kills += l_list[oid].pkills;
+		}
 
 		for (i = 0; i < z_info->r_max; i++)
 			tkills += l_list[i].pkills;

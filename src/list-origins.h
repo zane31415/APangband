@@ -28,3 +28,4 @@ ORIGIN(DROP_UNKNOWN,1,	"Dropped by an unknown monster %s")
 ORIGIN(DROP_POLY,	2,	"Dropped by %s %s") /* from polymorphees */
 ORIGIN(DROP_MIMIC,	2,	"Dropped by %s %s") /* from mimics */
 ORIGIN(DROP_WIZARD,	2,	"Dropped by %s %s") /* from wizard mode summons */
+ORIGIN(ARCHIPELAGO,	0,	"Granted by Archipelago") /* AP item reward, not a location find */

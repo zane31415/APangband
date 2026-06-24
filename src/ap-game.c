@@ -143,13 +143,41 @@ static void ap_mark_artifact_location_checked(const char *name)
 	}
 }
 
+/*
+ * If \p race is a quest monster (Sauron, Morgoth), mark its quest complete for
+ * the current character.  A quest level generates no normal down-stairs -- the
+ * way down is the magical staircase quest_check() builds on killing the quest
+ * monster.  But on a respawn that monster is already dead (max_num == 0 from the
+ * replay) and never spawns, so a fresh character could never finish the quest
+ * and would be soft-locked above the next level (notably stuck on 99, unable to
+ * reach Morgoth on 100).  Quietly completing the quest here -- setting the
+ * fields, NOT calling quest_check() -- unblocks descent without triggering the
+ * build-stairs message or total_winner.
+ */
+static void ap_complete_quest_for(const struct monster_race *race)
+{
+	size_t i;
+
+	if (!player || !player->quests) return;
+
+	for (i = 0; i < z_info->quest_max; i++) {
+		struct quest *q = &player->quests[i];
+
+		if (q->level && q->race == race) {
+			q->cur_num = q->max_num;
+			q->level = 0;
+		}
+	}
+}
+
 /**
  * A location check was confirmed for our slot.  This fires both for live checks
  * and -- crucially -- for the replay of every previously-checked location right
  * after connecting.  Locations are named after unique monsters and artifacts;
  * for a unique we zero its max_num so it stays dead (including for a brand-new
- * character reincarnating into the same AP slot), and for an artifact we note
- * its location as found so the Black Market won't re-offer it.
+ * character reincarnating into the same AP slot) and complete any quest it
+ * gates, and for an artifact we note its location as found so the Black Market
+ * won't re-offer it.
  */
 static void ap_check_confirmed(const char *name)
 {
@@ -157,8 +185,10 @@ static void ap_check_confirmed(const char *name)
 
 	if (race) {
 		/* Killed for good: prevents this unique from being generated again. */
-		if (rf_has(race->flags, RF_UNIQUE))
+		if (rf_has(race->flags, RF_UNIQUE)) {
 			race->max_num = 0;
+			ap_complete_quest_for(race);
+		}
 		return;
 	}
 
@@ -303,7 +333,13 @@ static void ap_object_know(struct object *obj)
 	 */
 	obj->known->artifact = obj->artifact;
 	player_know_object(player, obj);
-	obj->origin = ORIGIN_NONE;
+	/*
+	 * Tag AP rewards with a dedicated origin (persists through drop/pickup and
+	 * save/load).  For artifacts this lets pickup tell the granted reward apart
+	 * from the dungeon's attributeless location-check copy, so re-picking-up a
+	 * granted artifact does NOT falsely send its location check.
+	 */
+	obj->origin = ORIGIN_ARCHIPELAGO;
 }
 
 /** Build a known object of \p kind in a stack of \p qty. */
@@ -734,6 +770,15 @@ void ap_game_item_picked_up(const struct object *obj)
 {
 	if (!obj || !obj->artifact) return;
 	if (!ap_artifacts_as_checks()) return;
+
+	/*
+	 * Only the dungeon's attributeless location-check copy should send the
+	 * check; an AP-granted artifact (the reward for the check) is tagged
+	 * ORIGIN_ARCHIPELAGO, so picking it back up after dropping it must not count
+	 * as finding the location.  The grant never marks the artifact created, so
+	 * the real location copy can still spawn and be checked.
+	 */
+	if (obj->origin == ORIGIN_ARCHIPELAGO) return;
 
 	ap_send_artifact_check(obj->artifact);
 }
