@@ -69,9 +69,15 @@ endif
 CC = $(CROSS)gcc
 WRES = $(CROSS)windres
 WARNINGS = -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers
-# -DALLOW_BORG enables the automatic player ("Borg"); the borg/*.c bodies are all
-# wrapped in #ifdef ALLOW_BORG, so without it they compile to nothing.
-CFLAGS += $(WARNINGS) -std=c99 -DUSE_PRIVATE_PATHS -DSOUND -DALLOW_BORG -O2 -I.
+# The automatic player ("Borg") is gated on -DALLOW_BORG (the borg/*.c bodies are
+# all wrapped in #ifdef ALLOW_BORG, so without it they compile to nothing).  On by
+# default; build with BORG=no for a release build without it (e.g. the public
+# dist).  Toggling it requires a full rebuild (it spans many files).
+BORG ?= yes
+ifeq ($(BORG),yes)
+  BORG_FLAG = -DALLOW_BORG
+endif
+CFLAGS += $(WARNINGS) -std=c99 -DUSE_PRIVATE_PATHS -DSOUND $(BORG_FLAG) -O2 -I.
 
 # Archipelago client (vendored APCc): pull include/library flags for its
 # dependencies (jansson, libwebsockets, glib) from pkg-config in the MSYS2

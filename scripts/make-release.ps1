@@ -8,7 +8,8 @@
       * APAngband-win64.zip - the runnable Windows bundle (angband.exe, the
         Archipelago runtime DLLs, angband.INI, and a scrubbed copy of lib/).
       * angband.apworld     - the Archipelago generation world (the angband/
-        source folder, packaged under the internal package name "apangband").
+        source folder, packaged under the internal package name "angband").
+        Filename matches the package dir so AP's installer accepts it.
 
     angband.exe and the DLLs are build outputs (gitignored), so build first
     from the MSYS2 MinGW64 shell:  cd src && mingw32-make -f Makefile.win MINGW=yes
@@ -134,11 +135,11 @@ if (-not (Test-Path (Join-Path $worldSrc 'world.py'))) {
     throw "apworld source not found at $worldSrc (expected world.py)."
 }
 
-# AP imports the world by the package-folder name inside the .apworld; the
-# verified-working artifact uses "apangband" (the "Angband" game name comes from
-# archipelago.json, independent of this folder name).
+# AP imports the world by the package-folder name inside the .apworld. We stage
+# it under "angband" (the "Angband" game name itself comes from archipelago.json,
+# independent of this folder name).
 $stageApw = Join-Path $Dist 'apworld-stage'
-$pkgStage = Join-Path $stageApw 'apangband'
+$pkgStage = Join-Path $stageApw 'angband'
 New-Item -ItemType Directory -Path $pkgStage | Out-Null
 
 # Copy everything except Python caches (version-specific, not for distribution).
@@ -150,8 +151,13 @@ Get-ChildItem $pkgStage -Recurse -Directory -Force |
     Where-Object { $_.Name -eq '__pycache__' } |
     Remove-Item -Recurse -Force
 
-# Build as .zip first (New-Zip's top-level entry is the folder name "apangband"),
+# Build as .zip first (New-Zip's top-level entry is the folder name "angband"),
 # then rename to the .apworld extension Archipelago expects.
+#
+# The filename stem MUST contain the internal package-folder name: AP's installer
+# checks `directories[0] in apworld_path.stem` (LauncherComponents._install_apworld)
+# and otherwise aborts with the misleading "expected a single directory" error.
+# Package dir and filename are both "angband", so the check passes.
 $apwZip = Join-Path $Dist 'angband.apworld.zip'
 New-Zip $pkgStage $apwZip
 $apw = Join-Path $Dist 'angband.apworld'
