@@ -82,6 +82,14 @@
  * Hack -- the black market always charges twice as much as it should.
  */
 /*
+ * Above this many items the home is treated as "bloated" and draining it is
+ * prioritized.  A curated home wants far fewer; the AP replay can dump the whole
+ * received-item history into the home at once on a fresh life, which is both
+ * useless dead weight and what makes best_stuff/home_sell_best slow.
+ */
+#define BORG_HOME_DRAIN_AT 24
+
+/*
  * Choose a shop to visit
  */
 bool borg_choose_shop(void)
@@ -177,6 +185,31 @@ bool borg_choose_shop(void)
             return true;
         } else
             return false;
+    }
+
+    /*
+     * Step 0b -- Drain a bloated home before the normal buy/sell shuffling.
+     *
+     * borg_think_home_grab_useless() only pulls items whose removal does not
+     * hurt home power (duplicates first, then worthless junk), so the curated
+     * keepers are left alone and the function self-terminates once only keepers
+     * remain.  Marking the pack for crushing makes the pulled junk get destroyed
+     * rather than re-hoarded.  Prioritizing this when the home is bloated keeps
+     * it lean -- which also keeps best_stuff/home_sell_best fast (a packed home
+     * is what froze the borg on entry).
+     */
+    {
+        int hi, home_count = 0;
+        for (hi = 0; hi < z_info->store_inven_max; hi++)
+            if (borg_shops[BORG_HOME].ware[hi].iqty)
+                home_count++;
+        if (home_count > BORG_HOME_DRAIN_AT && borg_think_home_grab_useless()) {
+            borg_note(format("# Draining bloated home (%d items): pulling '%s'.",
+                home_count,
+                borg_shops[borg.goal.shop].ware[borg.goal.ware].desc));
+            borg_do_crush_junk = true;
+            return true;
+        }
     }
 
     /* Step 1 -- Sell items to the home */
