@@ -21,8 +21,10 @@
 
 #ifdef ALLOW_BORG
 
+#include "../cmd-core.h"
 #include "../obj-util.h"
 #include "../player-calcs.h"
+#include "../store.h"
 #include "../ui-event.h"
 
 #include "borg-flow-kill.h"
@@ -1161,6 +1163,27 @@ bool borg_think_home_buy_swap_armour(void)
 /*
  * Buy items from the current shop, if desired
  */
+/*
+ * Get the live game-side object occupying slot `ware` of store `shop`.
+ *
+ * The borg's borg_shops[shop].ware[] mirror is filled from store_stock_list()
+ * in the same order (see borg_cheat_store), so the borg's ware index maps
+ * directly onto that list.  Returns NULL for an empty or out-of-range slot.
+ */
+static struct object *borg_store_object(int shop, int ware)
+{
+    struct object  *obj = NULL;
+    struct object **list
+        = mem_zalloc(sizeof(struct object *) * z_info->store_inven_max);
+
+    store_stock_list(&stores[shop], list, z_info->store_inven_max);
+    if (ware >= 0 && ware < z_info->store_inven_max)
+        obj = list[ware];
+
+    mem_free(list);
+    return obj;
+}
+
 bool borg_think_shop_buy(void)
 {
     char purchase_target = '0';
@@ -1170,8 +1193,6 @@ bool borg_think_shop_buy(void)
         borg_shop *shop = &borg_shops[borg.goal.shop];
 
         borg_item *item = &shop->ware[borg.goal.ware];
-
-        purchase_target = SHOP_MENU_ITEMS[borg.goal.ware];
 
         /* Paranoid */
         if (item->tval == 0) {
@@ -1187,13 +1208,35 @@ bool borg_think_shop_buy(void)
         /* Log */
         borg_note(format("# Buying %s.", item->desc));
 
-        /* Buy the desired item */
-        borg_keypress(purchase_target);
-        borg_keypress('p');
+        if (borg.goal.shop == BORG_HOME) {
+            /*
+             * Take from the home with a direct command instead of a menu
+             * letter.  The home holds up to store_inven_max (256) items, but a
+             * single keystroke tag only addresses the visible ~26-row page, so
+             * letter selection can't reach deep slots.  Pushing CMD_RETRIEVE
+             * with the real stock object works for any slot.  'E' is an inert
+             * store command key (store_process_command_key returns false for
+             * it) whose only effect is to fire the store loop's
+             * cmdq_pop(CTX_STORE) in ui-store.c so the queued command runs.
+             */
+            struct object *obj
+                = borg_store_object(borg.goal.shop, borg.goal.ware);
+            if (obj) {
+                cmdq_push(CMD_RETRIEVE);
+                cmd_set_arg_item(cmdq_peek(), "item", obj);
+                cmd_set_arg_number(cmdq_peek(), "quantity", obj->number);
+                borg_keypress('E');
+            }
+        } else {
+            /* Buy by menu letter (non-home shops stay small, so this is fine) */
+            purchase_target = SHOP_MENU_ITEMS[borg.goal.ware];
+            borg_keypress(purchase_target);
+            borg_keypress('p');
 
-        /* Mega-Hack -- Accept the purchase */
-        borg_keypress(KC_ENTER);
-        borg_keypress(KC_ENTER);
+            /* Mega-Hack -- Accept the purchase */
+            borg_keypress(KC_ENTER);
+            borg_keypress(KC_ENTER);
+        }
 
         /* if the borg is scumming and bought it.,
          * reset the scum amount.
