@@ -37,10 +37,12 @@ void ap_buy_missed_location(const struct artifact *art);
 
 /**
  * Report that the player picked up \p obj.  When artifacts-as-checks mode is on
- * and the object is an artifact, this sends the matching location check.  No-op
- * otherwise.
+ * and \p obj is a dungeon location-check placeholder (an attributeless artifact,
+ * not an AP-granted reward), this sends the matching location check and returns
+ * true to signal the caller that the valueless placeholder should be discarded
+ * rather than carried.  Returns false (and does nothing) otherwise.
  */
-void ap_game_item_picked_up(const struct object *obj);
+bool ap_game_item_picked_up(const struct object *obj);
 
 /**
  * Report that the player has died, broadcasting a DeathLink to other players

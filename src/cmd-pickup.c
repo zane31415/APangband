@@ -237,14 +237,37 @@ static int auto_pickup_okay(const struct object *obj)
 static void player_pickup_aux(struct player *p, struct object *obj,
 							  int auto_max, bool domsg)
 {
-	int max = inven_carry_num(p, obj);
+	int max;
+
+	/*
+	 * Archipelago: a dungeon location-check placeholder records its check and
+	 * then vanishes -- it is valueless, so it neither consumes a pack slot nor
+	 * requires room (handled before the carry-space check below).
+	 */
+	if (ap_game_item_picked_up(obj)) {
+		char o_name[80];
+
+		object_desc(o_name, sizeof(o_name), obj, ODESC_PREFIX | ODESC_FULL, p);
+		msg("You note the Archipelago location of %s.", o_name);
+
+		if (obj->known) {
+			square_excise_object(p->cave, p->grid, obj->known);
+			delist_object(p->cave, obj->known);
+			object_delete(NULL, NULL, &obj->known);
+		}
+		square_excise_object(cave, p->grid, obj);
+		delist_object(cave, obj);
+		object_delete(NULL, NULL, &obj);
+
+		p->upkeep->notice |= PN_IGNORE;
+		return;
+	}
+
+	max = inven_carry_num(p, obj);
 
 	/* Confirm at least some of the object can be picked up */
 	if (max == 0)
 		quit_fmt("Failed pickup of %s", obj->kind->name);
-
-	/* Archipelago: picking up a (stripped) artifact sends its location check. */
-	ap_game_item_picked_up(obj);
 
 	/* Set ignore status */
 	p->upkeep->notice |= PN_IGNORE;

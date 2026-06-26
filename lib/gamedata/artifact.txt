@@ -2169,7 +2169,7 @@ graphics:=:d
 level:60
 weight:2
 cost:150000
-alloc:2:70 to 127
+alloc:2:69 to 127
 flags:PROT_FEAR | 
 values:STR[4] | DEX[4] | CON[4]
 act:HASTE2

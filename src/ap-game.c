@@ -138,6 +138,15 @@ static void ap_mark_artifact_location_checked(const char *name)
 		const struct artifact *art = &a_info[i];
 		if (art->name && ap_artifact_loc_matches(art, name)) {
 			ap_artifact_checked[art->aidx] = true;
+			/*
+			 * Mirror keeping checked uniques dead: once a location is checked,
+			 * suppress the dungeon's attributeless placeholder for it so we
+			 * don't keep generating valueless items (re-checking is a no-op).
+			 * AAC mode only -- outside it the natural artifact is the real
+			 * reward and must still be allowed to spawn.
+			 */
+			if (ap_artifacts_as_checks())
+				mark_artifact_created(art, true);
 			return;
 		}
 	}
@@ -201,7 +210,8 @@ static void ap_check_confirmed(const char *name)
  * The 23 item names below are frozen: they are the data-package contents the
  * apworld generates (see angband/data.py).  They split into:
  *   - 13 "Progressive <Category> Artifact": the Nth grant of a category yields
- *     the Nth artifact of that category ordered by artifact.txt 'level';
+ *     the Nth artifact of that category ordered by spawn depth (alloc_min, then
+ *     cost; see ap_art_cmp);
  *   - 2 specific named artifacts (the diggers Pick of Erebor / Mattock of Náin);
  *   - 5 consumables placed in the home;
  *   - 3 non-object boons (gold, experience, expanded shop books).
@@ -280,13 +290,22 @@ static int ap_prog_cat_of(const char *name)
 	return -1;
 }
 
-/** qsort comparator: order artifacts by depth 'level', then index for stability. */
+/**
+ * qsort comparator ordering artifacts weakest-first for progressive grants:
+ * native spawn depth (alloc_min) first, ties broken by cost, then aidx for a
+ * stable/deterministic result.  NB: NOT art->level -- that is the activation
+ * *difficulty*, which is meaningless for non-activating artifacts and unrelated
+ * to power even for activating ones (e.g. Narya's low-level fire bolt vs its
+ * deep, powerful ring), so it put deep rings like Narya/Nenya before shallow
+ * ones like the Ring of Barahir.
+ */
 static int ap_art_cmp(const void *a, const void *b)
 {
 	const struct artifact *x = *(const struct artifact * const *)a;
 	const struct artifact *y = *(const struct artifact * const *)b;
 
-	if (x->level != y->level) return x->level - y->level;
+	if (x->alloc_min != y->alloc_min) return x->alloc_min - y->alloc_min;
+	if (x->cost != y->cost) return x->cost - y->cost;
 	return (int)x->aidx - (int)y->aidx;
 }
 
@@ -766,10 +785,10 @@ static void ap_on_connected(void)
 	}
 }
 
-void ap_game_item_picked_up(const struct object *obj)
+bool ap_game_item_picked_up(const struct object *obj)
 {
-	if (!obj || !obj->artifact) return;
-	if (!ap_artifacts_as_checks()) return;
+	if (!obj || !obj->artifact) return false;
+	if (!ap_artifacts_as_checks()) return false;
 
 	/*
 	 * Only the dungeon's attributeless location-check copy should send the
@@ -778,9 +797,12 @@ void ap_game_item_picked_up(const struct object *obj)
 	 * as finding the location.  The grant never marks the artifact created, so
 	 * the real location copy can still spawn and be checked.
 	 */
-	if (obj->origin == ORIGIN_ARCHIPELAGO) return;
+	if (obj->origin == ORIGIN_ARCHIPELAGO) return false;
 
 	ap_send_artifact_check(obj->artifact);
+
+	/* It's a valueless placeholder; tell the caller to discard it. */
+	return true;
 }
 
 void ap_game_setup(void)
